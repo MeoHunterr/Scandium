@@ -105,8 +105,8 @@ public final class AppSettings: ObservableObject {
         let savedTheme = UserDefaults.standard.string(forKey: "scandium_theme_mode") ?? AppThemeMode.dark.rawValue
         self.themeMode = AppThemeMode(rawValue: savedTheme) ?? .dark
 
-        let savedLang = UserDefaults.standard.string(forKey: "scandium_language") ?? AppLanguage.vietnamese.rawValue
-        self.language = AppLanguage(rawValue: savedLang) ?? .vietnamese
+        let savedLang = UserDefaults.standard.string(forKey: "scandium_language") ?? AppLanguage.english.rawValue
+        self.language = AppLanguage(rawValue: savedLang) ?? .english
 
         let savedQuality = UserDefaults.standard.string(forKey: "scandium_audio_quality") ?? AudioQualitySetting.high.rawValue
         self.audioQuality = AudioQualitySetting(rawValue: savedQuality) ?? .high

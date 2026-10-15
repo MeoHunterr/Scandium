@@ -155,7 +155,7 @@ struct SettingsSheetView: View {
                                 Text(lang.displayName)
                                     .font(.system(size: 15, weight: .medium))
                                     .foregroundColor(ScandiumTheme.textPrimary)
-                                Text(lang == .vietnamese ? "Giao diện Tiếng Việt" : "English Interface")
+                                Text(lang == .vietnamese ? settings.loc("Giao diện Tiếng Việt", "Vietnamese Interface") : settings.loc("Giao diện Tiếng Anh", "English Interface"))
                                     .font(.system(size: 12))
                                     .foregroundColor(ScandiumTheme.subtext)
                             }

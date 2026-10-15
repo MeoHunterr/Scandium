@@ -406,7 +406,7 @@ final class DiscoverDataStore: ObservableObject {
 
     @Published var quickPicks: [Track] = []
     @Published var personalizedTracks: [Track] = []
-    @Published var personalizedTitle: String = "Dành riêng cho bạn"
+    @Published var personalizedTitle: String = "Made for You"
     @Published var personalizedSubtitle: String? = nil
     @Published var trendingTracks: [Track] = []
     @Published var chillTracks: [Track] = []

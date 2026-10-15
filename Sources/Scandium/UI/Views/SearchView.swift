@@ -15,12 +15,14 @@ struct SearchView: View {
     @State private var nextHref: String?
     @State private var isLoadingMore: Bool = false
     @State private var hasSearched: Bool = false
-    @State private var selectedFilter: String = "Tất cả"
+    @State private var selectedFilter: String = ""
     @State private var searchHistory: [String] = []
 
     @ObservedObject private var settings = AppSettings.shared
 
-    private let quickTags = ["Tất cả", "V-Pop", "Chill & Lo-Fi", "EDM Remix", "R&B", "Acoustic", "Podcast"]
+    private var quickTags: [String] {
+        [settings.loc("Tất cả", "All"), "V-Pop", "Chill & Lo-Fi", "EDM Remix", "R&B", "Acoustic", "Podcast"]
+    }
     private static let searchHistoryKey = "scandium_search_history_v1"
     private static let maxSearchHistory = 12
 
@@ -108,22 +110,26 @@ struct SearchView: View {
     private var quickFilterTagsView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(quickTags, id: \.self) { tag in
+                let tags = quickTags
+                let defaultTag = tags.first ?? "All"
+                let currentSelection = selectedFilter.isEmpty ? defaultTag : selectedFilter
+
+                ForEach(tags, id: \.self) { tag in
                     Button(action: {
                         selectedFilter = tag
-                        if tag != "Tất cả" {
+                        if tag != defaultTag {
                             searchText = tag
                             performSearch()
                         }
                     }) {
                         Text(tag)
-                            .font(.system(size: 12, weight: selectedFilter == tag ? .bold : .medium))
-                            .foregroundColor(selectedFilter == tag ? (ScandiumTheme.isDark ? .black : .white) : ScandiumTheme.textPrimary)
+                            .font(.system(size: 12, weight: currentSelection == tag ? .bold : .medium))
+                            .foregroundColor(currentSelection == tag ? (ScandiumTheme.isDark ? .black : .white) : ScandiumTheme.textPrimary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
                             .background(
                                 Capsule()
-                                    .fill(selectedFilter == tag ? ScandiumTheme.textPrimary : ScandiumTheme.surfaceElevated)
+                                    .fill(currentSelection == tag ? ScandiumTheme.textPrimary : ScandiumTheme.surfaceElevated)
                             )
                     }
                     .buttonStyle(PlainButtonStyle())
