@@ -416,8 +416,51 @@ final class DiscoverDataStore: ObservableObject {
     @Published var error: String?
 
     private var hasLoaded: Bool = false
+    private let cacheKey = "scandium_discover_cached_payload_v1"
 
-    private init() {}
+    private struct DiscoverCachePayload: Codable {
+        let quickPicks: [Track]
+        let personalizedTracks: [Track]
+        let personalizedTitle: String
+        let personalizedSubtitle: String?
+        let trendingTracks: [Track]
+        let chillTracks: [Track]
+        let remixTracks: [Track]
+    }
+
+    private init() {
+        loadCachedFeed()
+    }
+
+    private func loadCachedFeed() {
+        guard let data = UserDefaults.standard.data(forKey: cacheKey),
+              let payload = try? JSONDecoder().decode(DiscoverCachePayload.self, from: data) else {
+            return
+        }
+        self.quickPicks = payload.quickPicks
+        self.personalizedTracks = payload.personalizedTracks
+        self.personalizedTitle = payload.personalizedTitle
+        self.personalizedSubtitle = payload.personalizedSubtitle
+        self.trendingTracks = payload.trendingTracks
+        self.chillTracks = payload.chillTracks
+        self.remixTracks = payload.remixTracks
+        self.hasLoaded = true
+    }
+
+    private func saveCachedFeed() {
+        let payload = DiscoverCachePayload(
+            quickPicks: quickPicks,
+            personalizedTracks: personalizedTracks,
+            personalizedTitle: personalizedTitle,
+            personalizedSubtitle: personalizedSubtitle,
+            trendingTracks: trendingTracks,
+            chillTracks: chillTracks,
+            remixTracks: remixTracks
+        )
+        if let data = try? JSONEncoder().encode(payload) {
+            UserDefaults.standard.set(data, forKey: cacheKey)
+        }
+    }
 
     func refresh(api: SoundCloudAPI) async {
         await MainActor.run {
@@ -430,9 +473,7 @@ final class DiscoverDataStore: ObservableObject {
     }
 
     func loadInitialData(api: SoundCloudAPI, force: Bool = false) {
-        if hasLoaded && !force && (!quickPicks.isEmpty || !trendingTracks.isEmpty) {
-            return
-        }
+        // If already loading, avoid duplicate triggers
         if isLoading && !force {
             return
         }
@@ -444,7 +485,10 @@ final class DiscoverDataStore: ObservableObject {
 
     private func loadData(api: SoundCloudAPI, force: Bool) async {
         await MainActor.run {
-            self.isLoading = true
+            // Only set fullscreen shimmer if we have no cached content to show
+            if self.quickPicks.isEmpty && self.trendingTracks.isEmpty {
+                self.isLoading = true
+            }
             self.error = nil
         }
 
@@ -480,6 +524,7 @@ final class DiscoverDataStore: ObservableObject {
 
             self.isLoading = false
             self.hasLoaded = true
+            self.saveCachedFeed()
 
             if self.quickPicks.isEmpty && self.trendingTracks.isEmpty && self.personalizedTracks.isEmpty {
                 self.error = AppSettings.shared.loc(

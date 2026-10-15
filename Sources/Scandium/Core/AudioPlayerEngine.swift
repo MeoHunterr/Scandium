@@ -419,8 +419,9 @@ final class AudioPlayerEngine: ObservableObject {
                 }
 
                 if !newTracks.isEmpty {
+                    let tracksToEnqueue = newTracks
                     await MainActor.run {
-                        for t in newTracks {
+                        for t in tracksToEnqueue {
                             self.enqueue(t)
                         }
                         self.nextTrack()

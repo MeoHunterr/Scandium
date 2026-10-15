@@ -415,55 +415,6 @@ final class SoundCloudAPI: ObservableObject {
         return waveform.samples
     }
 
-    // MARK: - Generic Request with Auto-Retry on 401/403
-
-    private func performRequest<T: Decodable>(
-        urlString: String,
-        decodeAs type: T.Type,
-        retryCount: Int
-    ) async throws -> T {
-        guard let url = URL(string: urlString) else {
-            throw APIError.invalidURL(urlString)
-        }
-
-        var request = URLRequest(url: url)
-        request.setValue(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-            forHTTPHeaderField: "User-Agent"
-        )
-        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 15
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIError.invalidResponse
-        }
-
-        if (httpResponse.statusCode == 401 || httpResponse.statusCode == 403) && retryCount < Self.maxRetries {
-            try await scraper.refreshClientID()
-            let newClientID = try await scraper.getClientID()
-            let refreshedURLString = replaceClientID(in: urlString, with: newClientID)
-            return try await performRequest(
-                urlString: refreshedURLString,
-                decodeAs: type,
-                retryCount: retryCount + 1
-            )
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            throw APIError.httpError(statusCode: httpResponse.statusCode)
-        }
-
-        let decoder = JSONDecoder()
-        do {
-            return try decoder.decode(type, from: data)
-        } catch {
-            throw APIError.decodingFailed(underlying: error)
-        }
-    }
-
     /// Replaces the client_id parameter in a URL string with a new value.
     private func replaceClientID(in urlString: String, with newID: String) -> String {
         guard let regex = try? NSRegularExpression(pattern: #"client_id=[a-zA-Z0-9]+"#, options: []) else {

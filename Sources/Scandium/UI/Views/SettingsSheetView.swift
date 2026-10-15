@@ -350,7 +350,7 @@ struct SettingsSheetView: View {
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(ScandiumTheme.textPrimary)
                     Spacer()
-                    Text("1.0.0 (Build 2026)")
+                    Text("1.1.0")
                         .font(.system(size: 13))
                         .foregroundColor(ScandiumTheme.subtext)
                 }

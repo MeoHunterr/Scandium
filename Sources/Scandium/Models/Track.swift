@@ -78,26 +78,41 @@ struct Track: Codable, Identifiable, Equatable, Hashable {
 
     // MARK: - Artwork Helpers
 
-    /// Returns the artwork URL upgraded to 500×500 resolution.
-    /// SoundCloud artwork URLs contain size tokens like `-large`, `-t300x300`, etc.
-    /// This replaces any known size token with `-t500x500` for high-resolution display.
+    /// Returns high-resolution 500x500 artwork URL with fallback to artist avatar
     var highResArtworkURL: URL? {
-        guard let raw = artworkURL else { return nil }
-        let upgraded = Self.upgradeArtwork(urlString: raw, to: .t500x500)
-        return URL(string: upgraded)
+        if let raw = artworkURL {
+            let upgraded = Self.upgradeArtwork(urlString: raw, to: .t500x500)
+            if let url = URL(string: upgraded) { return url }
+        }
+        if let avatar = user?.avatarURL {
+            let upgraded = Self.upgradeArtwork(urlString: avatar, to: .t500x500)
+            if let url = URL(string: upgraded) { return url }
+        }
+        return nil
     }
 
-    /// Returns the artwork URL at the original/default size.
+    /// Returns default size artwork URL with fallback to artist avatar
     var artworkImageURL: URL? {
-        guard let raw = artworkURL else { return nil }
-        return URL(string: raw)
+        if let raw = artworkURL, let url = URL(string: raw) {
+            return url
+        }
+        if let avatar = user?.avatarURL, let url = URL(string: avatar) {
+            return url
+        }
+        return nil
     }
 
-    /// Returns the artwork URL at a given `ArtworkSize`.
+    /// Returns artwork at given size with fallback to artist avatar
     func artworkURL(size: ArtworkSize) -> URL? {
-        guard let raw = artworkURL else { return nil }
-        let upgraded = Self.upgradeArtwork(urlString: raw, to: size)
-        return URL(string: upgraded)
+        if let raw = artworkURL {
+            let upgraded = Self.upgradeArtwork(urlString: raw, to: size)
+            if let url = URL(string: upgraded) { return url }
+        }
+        if let avatar = user?.avatarURL {
+            let upgraded = Self.upgradeArtwork(urlString: avatar, to: size)
+            if let url = URL(string: upgraded) { return url }
+        }
+        return nil
     }
 
     /// Replaces the SoundCloud artwork size token in a URL string.
@@ -364,9 +379,15 @@ struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
     }
 
     var highResArtworkURL: URL? {
-        guard let raw = artworkURL else { return nil }
-        let upgraded = Track.upgradeArtwork(urlString: raw, to: .t500x500)
-        return URL(string: upgraded)
+        if let raw = artworkURL {
+            let upgraded = Track.upgradeArtwork(urlString: raw, to: .t500x500)
+            if let url = URL(string: upgraded) { return url }
+        }
+        if let avatar = user?.avatarURL {
+            let upgraded = Track.upgradeArtwork(urlString: avatar, to: .t500x500)
+            if let url = URL(string: upgraded) { return url }
+        }
+        return nil
     }
 }
 

@@ -81,13 +81,9 @@ struct ScandiumApp: App {
                 CrashDiagnosticManager.shared.markLaunchStarted()
 
                 if hadCrash {
-                    // Show Safe Mode immediately
                     showSafeMode = true
                 } else {
-                    // Small delay (0.1s) to ensure UIWindowScene is fully settled
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        mountMainUI()
-                    }
+                    mountMainUI()
                 }
             }
         }

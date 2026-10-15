@@ -240,18 +240,41 @@ struct CachedAsyncImage<Placeholder: View>: View {
 
         isLoading = true
         Task {
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let image = UIImage(data: data) {
-                    ImageCacheStore.shared.set(image, for: url)
-                    await MainActor.run {
-                        withAnimation(.easeIn(duration: 0.2)) {
-                            self.loadedImage = image
-                        }
-                        self.isLoading = false
-                    }
+            // Check memory cache first
+            if let cached = ImageCacheStore.shared.get(for: url) {
+                await MainActor.run {
+                    self.loadedImage = cached
+                    self.isLoading = false
                 }
+                return
+            }
+
+            // Download with user-agent and timeout
+            var request = URLRequest(url: url)
+            request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+            request.timeoutInterval = 10
+
+            var fetchedImage: UIImage? = nil
+            do {
+                let (data, _) = try await URLSession.shared.data(for: request)
+                fetchedImage = UIImage(data: data)
             } catch {
+                // Quick retry once on error
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if let (retryData, _) = try? await URLSession.shared.data(for: request) {
+                    fetchedImage = UIImage(data: retryData)
+                }
+            }
+
+            if let img = fetchedImage {
+                ImageCacheStore.shared.set(img, for: url)
+                await MainActor.run {
+                    withAnimation(.easeIn(duration: 0.2)) {
+                        self.loadedImage = img
+                    }
+                    self.isLoading = false
+                }
+            } else {
                 await MainActor.run {
                     self.isLoading = false
                 }
@@ -280,29 +303,71 @@ extension CachedAsyncImage where Placeholder == ShimmerView {
     }
 }
 
-// MARK: - Image Cache (Thread-Safe NSCache)
+// MARK: - Image Cache (Memory + Disk)
 
 final class ImageCacheStore {
     static let shared = ImageCacheStore()
 
-    private let cache = NSCache<NSString, UIImage>()
+    private let memoryCache = NSCache<NSString, UIImage>()
+    private let diskCacheDir: URL?
 
     private init() {
-        cache.countLimit = 200
-        cache.totalCostLimit = 120 * 1024 * 1024 // 120 MB
+        memoryCache.countLimit = 300
+        memoryCache.totalCostLimit = 150 * 1024 * 1024
+
+        let paths = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
+        if let base = paths.first {
+            let dir = base.appendingPathComponent("scandium_image_cache", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            self.diskCacheDir = dir
+        } else {
+            self.diskCacheDir = nil
+        }
+    }
+
+    private func diskKey(for url: URL) -> String {
+        let raw = url.absoluteString
+        let hash = raw.utf8.reduce(5381) { ($0 << 5) &+ $0 &+ Int($1) }
+        return "img_\(abs(hash)).jpg"
     }
 
     func get(for url: URL) -> UIImage? {
-        cache.object(forKey: url.absoluteString as NSString)
+        let key = url.absoluteString as NSString
+        if let mem = memoryCache.object(forKey: key) {
+            return mem
+        }
+
+        guard let dir = diskCacheDir else { return nil }
+        let fileURL = dir.appendingPathComponent(diskKey(for: url))
+        if let data = try? Data(contentsOf: fileURL), let diskImg = UIImage(data: data) {
+            memoryCache.setObject(diskImg, forKey: key, cost: data.count)
+            return diskImg
+        }
+        return nil
     }
 
     func set(_ image: UIImage, for url: URL) {
-        let cost = image.jpegData(compressionQuality: 0.9)?.count ?? 0
-        cache.setObject(image, forKey: url.absoluteString as NSString, cost: cost)
+        let key = url.absoluteString as NSString
+        let data = image.jpegData(compressionQuality: 0.85)
+        let cost = data?.count ?? 0
+        memoryCache.setObject(image, forKey: key, cost: cost)
+
+        if let data = data, let dir = diskCacheDir {
+            let fileURL = dir.appendingPathComponent(diskKey(for: url))
+            DispatchQueue.global(qos: .utility).async {
+                try? data.write(to: fileURL, options: .atomic)
+            }
+        }
     }
 
     func clear() {
-        cache.removeAllObjects()
+        memoryCache.removeAllObjects()
+        if let dir = diskCacheDir,
+           let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+            for f in files {
+                try? FileManager.default.removeItem(at: f)
+            }
+        }
     }
 }
 
