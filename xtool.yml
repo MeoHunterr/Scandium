@@ -1,0 +1,7 @@
+# xtool.yml — Scandium build configuration
+# Author: MeoHunter
+
+version: 1
+bundleID: com.meohunter.scandium
+product: Scandium
+infoPath: Info.plist

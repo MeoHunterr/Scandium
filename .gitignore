@@ -1,0 +1,10 @@
+# Custom ignored docs
+instructions.md
+rule.md
+
+# Build outputs & tools
+.build/
+xtool/
+*.ipa
+*.tar.gz
+.swiftpm/
