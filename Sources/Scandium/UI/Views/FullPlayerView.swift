@@ -134,10 +134,9 @@ struct FullPlayerView: View {
 
                 Spacer()
 
-                Text(AppSettings.shared.loc("ĐANG PHÁT", "NOW PLAYING"))
-                    .font(.system(size: 11, weight: .semibold))
+                Text(AppSettings.shared.loc("Đang phát", "Now Playing"))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(ScandiumTheme.subtext)
-                    .tracking(1.5)
 
                 Spacer()
 

@@ -66,7 +66,7 @@ struct DiscoverView: View {
 
                 // Horizontal Carousel: Thịnh hành (Trending)
                 carouselSection(
-                    title: settings.loc("Thịnh hành hôm nay", "Trending Today"),
+                    title: settings.loc("Thịnh hành (VN)", "Trending (VN)"),
                     tracks: store.trendingTracks
                 )
 
@@ -528,8 +528,8 @@ final class DiscoverDataStore: ObservableObject {
 
             if self.quickPicks.isEmpty && self.trendingTracks.isEmpty && self.personalizedTracks.isEmpty {
                 self.error = AppSettings.shared.loc(
-                    "Không tải được dữ liệu SoundCloud. Hãy thử lại hoặc vào Cấu hình Client ID.",
-                    "Unable to load SoundCloud data. Please try again or configure Client ID."
+                    "Không tải được dữ liệu âm nhạc. Hãy thử lại hoặc kiểm tra cấu hình mạng.",
+                    "Unable to load music data. Please try again or check network config."
                 )
             }
         }
@@ -602,7 +602,7 @@ final class DiscoverDataStore: ObservableObject {
                 do {
                     let related = try await api.getRelatedTracks(trackID: seed.id, limit: 12)
                     if !related.isEmpty {
-                        let title = isEn ? "Recommended for You" : "Gợi ý cho bạn"
+                        let title = isEn ? "Related Recommendations" : "Gợi ý liên quan"
                         let subtitle = isEn ? "Based on '\(seed.title)' you liked" : "Dựa trên '\(seed.title)' bạn đã thích"
                         return (title, subtitle, related)
                     }
@@ -714,7 +714,7 @@ struct ClientIDConfigModal: View {
                                 .frame(width: 10, height: 10)
 
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(settings.loc("Trạng thái SoundCloud Client ID", "SoundCloud Client ID Status"))
+                                Text(settings.loc("Trạng thái Token dịch vụ (Client ID)", "Service Token / Client ID Status"))
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundColor(ScandiumTheme.textPrimary)
                                 Text(scraper.statusDescription)
@@ -730,7 +730,7 @@ struct ClientIDConfigModal: View {
                         // Current ID info
                         if let current = scraper.currentClientID {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(settings.loc("ID hiện hành:", "Current ID:"))
+                                Text(settings.loc("Token hiện hành:", "Current Token:"))
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundColor(ScandiumTheme.subtext)
                                 Text(current)
@@ -752,7 +752,7 @@ struct ClientIDConfigModal: View {
                                     try await scraper.refreshClientID()
                                     await MainActor.run {
                                         isRefreshing = false
-                                        statusToast = settings.loc("Cào mới thành công!", "Refreshed successfully!")
+                                        statusToast = settings.loc("Làm mới Token thành công!", "Refreshed Token successfully!")
                                     }
                                 } catch {
                                     await MainActor.run {
@@ -770,7 +770,7 @@ struct ClientIDConfigModal: View {
                                 } else {
                                     Image(systemName: "arrow.clockwise")
                                 }
-                                Text(settings.loc("Tự động cào lại Client ID", "Auto-Scrape Client ID"))
+                                Text(settings.loc("Tự động làm mới Client ID", "Auto-Refresh Client ID"))
                                     .font(.system(size: 14, weight: .semibold))
                             }
                             .foregroundColor(ScandiumTheme.textPrimary)
@@ -785,7 +785,7 @@ struct ClientIDConfigModal: View {
 
                         // Manual Entry
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(settings.loc("Nhập Client ID thủ công", "Manual Client ID Entry"))
+                            Text(settings.loc("Cấu hình Client ID thủ công", "Manual Client ID Config"))
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(ScandiumTheme.textPrimary)
 
@@ -844,7 +844,7 @@ struct ClientIDConfigModal: View {
                     .padding(20)
                 }
             }
-            .navigationTitle(settings.loc("Cấu hình SoundCloud", "SoundCloud Config"))
+            .navigationTitle(settings.loc("Cấu hình dịch vụ", "Service Configuration"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

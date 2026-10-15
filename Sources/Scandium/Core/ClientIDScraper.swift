@@ -7,10 +7,33 @@ final class ClientIDScraper: ObservableObject {
 
     // MARK: - Published State
 
+    public enum ScraperStatus {
+        case ready
+        case manual
+        case cached
+        case fallback
+        case syncing
+        case online
+        case fallbackError
+    }
+
     @Published private(set) var clientID: String?
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var lastError: String?
-    @Published private(set) var statusDescription: String = "Sẵn sàng"
+    @Published private(set) var status: ScraperStatus = .ready
+
+    var statusDescription: String {
+        let isEn = AppSettings.shared.language == .english
+        switch status {
+        case .ready: return isEn ? "Ready" : "Sẵn sàng"
+        case .manual: return isEn ? "Manual" : "Thủ công"
+        case .cached: return isEn ? "Cached" : "Đã lưu đệm"
+        case .fallback: return isEn ? "Fallback" : "Dự phòng"
+        case .syncing: return isEn ? "Syncing..." : "Đang làm mới..."
+        case .online: return isEn ? "Online" : "Trực tuyến"
+        case .fallbackError: return isEn ? "Fallback (Error)" : "Dự phòng (Lỗi)"
+        }
+    }
 
     var currentClientID: String? {
         clientID
@@ -54,15 +77,15 @@ final class ClientIDScraper: ObservableObject {
         // Priority: Manual override -> Cached ID -> First fallback ID
         if let manual = Self.loadManualClientID() {
             self.clientID = manual
-            self.statusDescription = "Thủ công"
+            self.status = .manual
         } else if let cached = Self.loadCachedClientID(), !Self.isCacheExpired() {
             self.clientID = cached
-            self.statusDescription = "Đã lưu đệm"
+            self.status = .cached
         } else {
             let fallback = Self.fallbackClientIDs.first ?? "A0cxVCVBD6HAZsm0P3nxKaPaZtrGqkXN"
             Self.cacheClientID(fallback)
             self.clientID = fallback
-            self.statusDescription = "Dự phòng"
+            self.status = .fallback
         }
     }
 
@@ -76,7 +99,7 @@ final class ClientIDScraper: ObservableObject {
         if let manual = Self.loadManualClientID() {
             await MainActor.run {
                 self.clientID = manual
-                self.statusDescription = "Thủ công"
+                self.status = .manual
             }
             return manual
         }
@@ -85,7 +108,7 @@ final class ClientIDScraper: ObservableObject {
         if let cached = Self.loadCachedClientID(), !Self.isCacheExpired() {
             await MainActor.run {
                 self.clientID = cached
-                self.statusDescription = "Đã lưu đệm"
+                self.status = .cached
             }
             return cached
         }
@@ -108,7 +131,7 @@ final class ClientIDScraper: ObservableObject {
         if let manual = Self.loadManualClientID() {
             await MainActor.run {
                 self.clientID = manual
-                self.statusDescription = "Thủ công"
+                self.status = .manual
             }
             return manual
         }
@@ -124,7 +147,7 @@ final class ClientIDScraper: ObservableObject {
             await MainActor.run {
                 self.isLoading = true
                 self.lastError = nil
-                self.statusDescription = "Đang cào..."
+                self.status = .syncing
             }
 
             do {
@@ -133,7 +156,7 @@ final class ClientIDScraper: ObservableObject {
                 await MainActor.run {
                     self.clientID = id
                     self.isLoading = false
-                    self.statusDescription = "Trực tuyến"
+                    self.status = .online
                 }
                 return id
             } catch {
@@ -144,7 +167,7 @@ final class ClientIDScraper: ObservableObject {
                     self.clientID = fallback
                     self.isLoading = false
                     self.lastError = error.localizedDescription
-                    self.statusDescription = "Dự phòng (Lỗi cào)"
+                    self.status = .fallbackError
                 }
                 return fallback
             }
@@ -161,16 +184,16 @@ final class ClientIDScraper: ObservableObject {
         if let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), id.count == Self.clientIDLength {
             UserDefaults.standard.set(id, forKey: Self.manualOverrideKey)
             self.clientID = id
-            self.statusDescription = "Thủ công"
+            self.status = .manual
             self.lastError = nil
         } else {
             UserDefaults.standard.removeObject(forKey: Self.manualOverrideKey)
             if let cached = Self.loadCachedClientID() {
                 self.clientID = cached
-                self.statusDescription = "Đã lưu đệm"
+                self.status = .cached
             } else {
                 self.clientID = Self.fallbackClientIDs.first
-                self.statusDescription = "Dự phòng"
+                self.status = .fallback
             }
         }
     }
@@ -189,7 +212,7 @@ final class ClientIDScraper: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Self.cacheTimestampKey)
         if !isManualOverride {
             self.clientID = Self.fallbackClientIDs.first
-            self.statusDescription = "Dự phòng"
+            self.status = .fallback
         }
     }
 
@@ -421,7 +444,7 @@ enum ScraperError: LocalizedError {
         case .deallocated:
             return "ClientIDScraper bị giải phóng bộ nhớ."
         case .allEndpointsFailed(let msg):
-            return "Tất cả các nguồn cào client_id đều thất bại: \(msg)"
+            return "Tất cả các nguồn lấy client_id đều thất bại: \(msg)"
         }
     }
 }

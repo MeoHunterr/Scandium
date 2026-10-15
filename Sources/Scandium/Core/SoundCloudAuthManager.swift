@@ -120,7 +120,7 @@ final class SoundCloudAuthManager: ObservableObject {
             await syncLibrary()
         } catch {
             print("[ScandiumAuth] getMe failed: \(error.localizedDescription)")
-            self.errorMessage = "Không thể tải hồ sơ SoundCloud: \(error.localizedDescription)"
+            self.errorMessage = AppSettings.shared.loc("Không thể tải hồ sơ: \(error.localizedDescription)", "Unable to fetch profile: \(error.localizedDescription)")
             self.isAuthenticated = true // Keep authenticated if token is valid
             self.savePersistedState()
         }
@@ -150,7 +150,7 @@ final class SoundCloudAuthManager: ObservableObject {
             self.savePersistedState()
             await syncLibrary()
         } catch {
-            self.errorMessage = "Không thể tìm thấy tài khoản: \(error.localizedDescription)"
+            self.errorMessage = AppSettings.shared.loc("Không thể tìm thấy tài khoản: \(error.localizedDescription)", "Account not found: \(error.localizedDescription)")
         }
 
         self.isLoading = false
@@ -186,7 +186,7 @@ final class SoundCloudAuthManager: ObservableObject {
             self.savePersistedState()
         } catch {
             print("[ScandiumAuth] syncLibrary failed: \(error.localizedDescription)")
-            self.errorMessage = "Lỗi khi đồng bộ danh sách: \(error.localizedDescription)"
+            self.errorMessage = AppSettings.shared.loc("Lỗi khi đồng bộ danh sách: \(error.localizedDescription)", "Failed to synchronize library: \(error.localizedDescription)")
         }
 
         self.isLoading = false

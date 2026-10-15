@@ -316,9 +316,9 @@ struct SearchView: View {
                 .font(.system(size: 34, weight: .light))
                 .foregroundColor(Color.orange)
 
-            Text("Không thể tải kết quả")
+            Text(settings.loc("Không thể tải kết quả", "Unable to load results"))
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(ScandiumTheme.textPrimary)
 
             Text(message)
                 .font(.system(size: 13))
@@ -327,9 +327,9 @@ struct SearchView: View {
                 .padding(.horizontal, 24)
 
             Button(action: performSearch) {
-                Text("Thử lại")
+                Text(settings.loc("Thử lại", "Retry"))
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(ScandiumTheme.textPrimary)
                     .padding(.horizontal, 22)
                     .padding(.vertical, 8)
                     .background(ScandiumTheme.surfaceElevated)

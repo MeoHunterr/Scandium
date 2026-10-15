@@ -39,10 +39,10 @@ struct ProfileView: View {
                 // 0. Settings & Preferences Card
                 settingsSectionCard
 
-                // 1. SoundCloud Account Section
+                // 1. Account Sync Section
                 accountSection
 
-                // 2. SoundCloud Client ID Section
+                // 2. Service Token / Client ID Section
                 clientIDSection
 
                 // 3. Storage & Cache Section (Live calculation & distribution bar)
@@ -53,6 +53,9 @@ struct ProfileView: View {
 
                 // 5. About Section
                 aboutSection
+
+                // 6. FOSS Open Source Disclaimer
+                fossDisclaimerView
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 130)
@@ -63,13 +66,13 @@ struct ProfileView: View {
                 onTokenCaptured: { token in
                     Task {
                         await auth.handleOAuthToken(token)
-                        showToast("Đã đăng nhập tài khoản SoundCloud thành công!")
+                        showToast(settings.loc("Đồng bộ tài khoản thành công!", "Account synchronized successfully!"))
                     }
                 },
                 onProfileSubmitted: { profile in
                     Task {
                         await auth.handleProfileURL(profile)
-                        showToast("Đã kết nối tài khoản qua link profile!")
+                        showToast(settings.loc("Đã kết nối tài khoản qua link hồ sơ!", "Connected account via profile link!"))
                     }
                 }
             )
@@ -91,14 +94,14 @@ struct ProfileView: View {
         }
         .alert(isPresented: $showClearCacheAlert) {
             Alert(
-                title: Text("Dọn sạch bộ nhớ đệm?"),
-                message: Text("Hệ thống sẽ xóa ảnh bìa và file âm thanh tạm. Bài hát đã thích và thiết lập của bạn sẽ được giữ nguyên."),
-                primaryButton: .destructive(Text("Xóa đệm")) {
+                title: Text(settings.loc("Dọn sạch cache tạm?", "Clear temporary cache?")),
+                message: Text(settings.loc("Hệ thống sẽ xóa ảnh bìa và file âm thanh tạm. Bài hát đã thích và thiết lập của bạn sẽ được giữ nguyên.", "Cached artwork and temporary audio files will be deleted. Your liked tracks and settings will be preserved.")),
+                primaryButton: .destructive(Text(settings.loc("Dọn sạch ngay", "Clear Now"))) {
                     storage.clearCache()
                     ImageCacheStore.shared.clear()
-                    showToast("Đã giải phóng bộ nhớ đệm!")
+                    showToast(settings.loc("Đã dọn sạch cache tạm!", "Temporary cache cleared!"))
                 },
-                secondaryButton: .cancel(Text("Hủy"))
+                secondaryButton: .cancel(Text(settings.loc("Hủy", "Cancel")))
             )
         }
         .overlay(
@@ -187,12 +190,12 @@ struct ProfileView: View {
                             .font(.system(size: 12))
                             .foregroundColor(ScandiumTheme.spotifyGreen)
                     }
-                    Text(user.fullName ?? settings.loc("Tài khoản SoundCloud", "SoundCloud Account"))
+                    Text(user.fullName ?? settings.loc("Tài khoản dịch vụ (SoundCloud)", "Service Account (SoundCloud)"))
                         .font(.system(size: 12))
                         .foregroundColor(ScandiumTheme.subtext)
                 } else {
                     HStack(spacing: 6) {
-                        Text("Scandium")
+                        Text("Scandium [21 Sc]")
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(ScandiumTheme.textPrimary)
                         Text("iOS 15+")
@@ -203,7 +206,7 @@ struct ProfileView: View {
                             .background(ScandiumTheme.spotifyGreen.opacity(0.15))
                             .clipShape(Capsule())
                     }
-                    Text(settings.loc("Tác giả: MeoHunter • Mã nguồn mở", "Author: MeoHunter • Open Source"))
+                    Text(settings.loc("Tác giả: MeoHunter • GNU GPL v3.0 (Open Source)", "Author: MeoHunter • GNU GPL v3.0 (Open Source)"))
                         .font(.system(size: 12))
                         .foregroundColor(ScandiumTheme.subtext)
                 }
@@ -219,7 +222,7 @@ struct ProfileView: View {
 
     private var accountSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionHeader(title: settings.loc("TÀI KHOẢN SOUNDCLOUD", "SOUNDCLOUD ACCOUNT"))
+            sectionHeader(title: settings.loc("Đồng bộ tài khoản (SoundCloud)", "Account Sync (SoundCloud)"))
 
             VStack(spacing: 0) {
                 if !auth.isAuthenticated {
@@ -228,8 +231,8 @@ struct ProfileView: View {
                         ThreadsRow(
                             icon: "globe",
                             iconColor: ScandiumTheme.spotifyGreen,
-                            title: settings.loc("Đăng nhập SoundCloud (Dễ)", "Sign in to SoundCloud (Easy)"),
-                            subtitle: settings.loc("Dán link profile hoặc dùng OAuth token nâng cao", "Paste profile link or use advanced OAuth token")
+                            title: settings.loc("Đồng bộ tài khoản SoundCloud", "Sync SoundCloud Account"),
+                            subtitle: settings.loc("Dán link hồ sơ công khai hoặc sử dụng Token dịch vụ", "Paste public profile link or use Service Token")
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -238,8 +241,8 @@ struct ProfileView: View {
                     Button(action: { showManualAuthModal = true }) {
                         ThreadsRow(
                             icon: "link",
-                            title: settings.loc("Nhập Token OAuth hoặc Link Profile", "Enter OAuth Token or Profile Link"),
-                            subtitle: settings.loc("Dán mã oauth_token hoặc link soundcloud.com/user", "Paste oauth_token string or soundcloud.com/user link"),
+                            title: settings.loc("Nhập Token dịch vụ hoặc Link hồ sơ", "Enter Service Token or Profile Link"),
+                            subtitle: settings.loc("Dán mã OAuth token hoặc đường dẫn soundcloud.com/user", "Paste OAuth token or soundcloud.com/user link"),
                             showDivider: false
                         )
                     }
@@ -249,13 +252,13 @@ struct ProfileView: View {
                     Button(action: {
                         Task {
                             await auth.syncLibrary()
-                            showToast(settings.loc("Đã đồng bộ bài hát từ tài khoản SoundCloud!", "Synced library from SoundCloud!"))
+                            showToast(settings.loc("Đã đồng bộ bài hát từ tài khoản!", "Synced library from account!"))
                         }
                     }) {
                         ThreadsRow(
                             icon: "arrow.triangle.2.circlepath",
                             iconColor: ScandiumTheme.spotifyGreen,
-                            title: settings.loc("Đồng bộ Thư viện SoundCloud", "Sync SoundCloud Library"),
+                            title: settings.loc("Đồng bộ thư viện tài khoản", "Sync Account Library"),
                             subtitle: "\(auth.userLikedTracks.count) \(settings.loc("bài hát", "tracks")) • \(auth.userPlaylists.count) playlist"
                         )
                     }
@@ -264,12 +267,12 @@ struct ProfileView: View {
                     // Sign out
                     Button(action: {
                         auth.logout()
-                        showToast(settings.loc("Đã đăng xuất tài khoản", "Signed out successfully"))
+                        showToast(settings.loc("Đã hủy đồng bộ tài khoản", "Account disconnected"))
                     }) {
                         ThreadsRow(
                             icon: "rectangle.portrait.and.arrow.right",
                             iconColor: Color.red,
-                            title: settings.loc("Đăng xuất tài khoản", "Sign Out"),
+                            title: settings.loc("Hủy đồng bộ tài khoản", "Disconnect Account"),
                             showDivider: false
                         ) {
                             Text(settings.loc("Đăng xuất", "Sign Out"))
@@ -289,14 +292,14 @@ struct ProfileView: View {
 
     private var clientIDSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionHeader(title: settings.loc("SOUNDCLOUD CLIENT ID", "SOUNDCLOUD CLIENT ID"))
+            sectionHeader(title: settings.loc("Service Token / Client ID (SoundCloud)", "Service Token / Client ID (SoundCloud)"))
 
             VStack(spacing: 0) {
                 // Status Row
                 ThreadsRow(
                     icon: "key",
                     iconColor: scraper.lastError == nil ? ScandiumTheme.spotifyGreen : Color.orange,
-                    title: settings.loc("Trạng thái Client ID", "Client ID Status")
+                    title: scraper.lastError == nil ? settings.loc("Trạng thái Token: Đang kích hoạt", "Token Status: Active") : settings.loc("Trạng thái Token: Cần kiểm tra", "Token Status: Attention Needed")
                 ) {
                     HStack(spacing: 6) {
                         Circle()
@@ -317,7 +320,7 @@ struct ProfileView: View {
                             try await scraper.refreshClientID()
                             await MainActor.run {
                                 isRefreshingID = false
-                                showToast(settings.loc("Cào mới Client ID thành công!", "Client ID scraped successfully!"))
+                                showToast(settings.loc("Làm mới Client ID thành công!", "Client ID refreshed successfully!"))
                             }
                         } catch {
                             await MainActor.run {
@@ -329,8 +332,8 @@ struct ProfileView: View {
                 }) {
                     ThreadsRow(
                         icon: "arrow.clockwise",
-                        title: settings.loc("Tự động cào lại Client ID", "Auto-Scrape Client ID"),
-                        subtitle: settings.loc("Quét bundle JS mới nhất từ soundcloud.com", "Scan latest JS bundle from soundcloud.com")
+                        title: settings.loc("Tự động làm mới Client ID", "Auto-Refresh Client ID"),
+                        subtitle: settings.loc("Quét mã JavaScript mới nhất từ dịch vụ mạng", "Scan latest JavaScript bundle from network service")
                     ) {
                         if isRefreshingID {
                             ProgressView()
@@ -360,7 +363,7 @@ struct ProfileView: View {
                     ThreadsRow(
                         icon: "questionmark.circle",
                         title: settings.loc("Hướng dẫn lấy Client ID thủ công", "Manual Client ID Guide"),
-                        subtitle: settings.loc("Cách lấy mã 32 ký tự trên máy tính qua DevTools", "Extract 32-char ID on PC via DevTools"),
+                        subtitle: settings.loc("Cách lấy mã 32 ký tự trên máy tính qua DevTools", "Extract 32-char key on PC via DevTools"),
                         showDivider: false
                     )
                 }
@@ -375,13 +378,13 @@ struct ProfileView: View {
 
     private var storageSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionHeader(title: settings.loc("DUNG LƯỢNG & BỘ NHỚ ĐỆM", "STORAGE & CACHE"))
+            sectionHeader(title: settings.loc("Bộ nhớ đệm & Dữ liệu", "Storage & Cache"))
 
             VStack(spacing: 14) {
                 // Visual Distribution Bar
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text(settings.loc("Tổng dung lượng chiếm dụng", "Total Storage Used"))
+                        Text(settings.loc("Bộ nhớ đệm & Dữ liệu", "Storage & Cache"))
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(ScandiumTheme.textPrimary)
                         Spacer()
@@ -431,11 +434,11 @@ struct ProfileView: View {
                         Image(systemName: "trash")
                             .font(.system(size: 16))
                             .foregroundColor(.orange)
-                        Text(settings.loc("Xóa bộ nhớ đệm (Clear Cache)", "Clear Cache"))
+                        Text(settings.loc("Dọn sạch cache tạm", "Clear Temporary Cache"))
                             .font(.system(size: 15, weight: .medium))
                             .foregroundColor(ScandiumTheme.textPrimary)
                         Spacer()
-                        Text(settings.loc("Giải phóng", "Free up"))
+                        Text(settings.loc("Dọn dẹp", "Clean"))
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.orange)
                     }
@@ -464,13 +467,13 @@ struct ProfileView: View {
 
     private var audioQualitySection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionHeader(title: settings.loc("CHẤT LƯỢNG PHÁT TRỰC TUYẾN", "AUDIO STREAMING QUALITY"))
+            sectionHeader(title: settings.loc("Chất lượng âm thanh", "Audio Quality"))
 
             VStack(spacing: 0) {
                 ThreadsRow(
                     icon: "waveform",
                     title: settings.loc("Chất lượng âm thanh", "Audio Quality"),
-                    subtitle: settings.loc("Ưu tiên HLS 256kbps khi có sẵn", "Prioritize 256kbps HLS when available"),
+                    subtitle: settings.loc("128 kbps MP3 / 256 kbps AAC khi có sẵn", "128 kbps MP3 / 256 kbps AAC when available"),
                     showDivider: false
                 ) {
                     Text(settings.loc("Tự động (Cao)", "Auto (High)"))
@@ -487,27 +490,67 @@ struct ProfileView: View {
 
     private var aboutSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionHeader(title: settings.loc("THÔNG TIN ỨNG DỤNG", "ABOUT SCANDIUM"))
+            sectionHeader(title: settings.loc("Thông tin ứng dụng", "About Scandium"))
 
             VStack(spacing: 0) {
                 ThreadsRow(
                     icon: "app.badge",
+                    title: settings.loc("Tên ứng dụng", "Application"),
+                    showDivider: true
+                ) {
+                    Text("Scandium [21 Sc]")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(ScandiumTheme.textPrimary)
+                }
+
+                ThreadsRow(
+                    icon: "info.circle",
                     title: settings.loc("Phiên bản", "Version"),
                     showDivider: true
                 ) {
-                    Text("1.1.0")
+                    Text("1.2.0")
                         .font(.system(size: 13))
+                        .foregroundColor(ScandiumTheme.subtext)
+                }
+
+                ThreadsRow(
+                    icon: "doc.text",
+                    title: settings.loc("Giấy phép", "License"),
+                    showDivider: true
+                ) {
+                    Text("GNU GPL v3.0 (Open Source)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(ScandiumTheme.spotifyGreen)
+                }
+
+                ThreadsRow(
+                    icon: "chevron.left.forwardslash.chevron.right",
+                    title: settings.loc("Mã nguồn", "Source Code"),
+                    showDivider: true
+                ) {
+                    Text("github.com/MeoHunterr/Scandium")
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(ScandiumTheme.subtext)
                 }
 
                 ThreadsRow(
                     icon: "person.circle",
                     title: settings.loc("Tác giả", "Author"),
-                    showDivider: false
+                    showDivider: true
                 ) {
                     Text("MeoHunter")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(ScandiumTheme.textPrimary)
+                }
+
+                ThreadsRow(
+                    icon: "network",
+                    title: settings.loc("Loại ứng dụng", "Client Type"),
+                    showDivider: false
+                ) {
+                    Text(settings.loc("Client bên thứ ba", "Unofficial Client"))
+                        .font(.system(size: 12))
+                        .foregroundColor(ScandiumTheme.subtext)
                 }
             }
             .background(ScandiumTheme.surfaceDark)
@@ -515,13 +558,26 @@ struct ProfileView: View {
         }
     }
 
+    // MARK: - FOSS Disclaimer View
+
+    private var fossDisclaimerView: some View {
+        Text(settings.loc(
+            "Scandium là phần mềm mã nguồn mở độc lập, không liên kết hay được chứng thực bởi SoundCloud Global Limited & Co. KG.",
+            "Scandium is an independent open-source software, not affiliated with or endorsed by SoundCloud Global Limited & Co. KG."
+        ))
+        .font(.system(size: 11))
+        .foregroundColor(ScandiumTheme.subtext.opacity(0.75))
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
+    }
+
     // MARK: - Section Header
 
     private func sectionHeader(title: String) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .bold))
+            .font(.system(size: 12, weight: .semibold))
             .foregroundColor(ScandiumTheme.subtext)
-            .tracking(1.2)
             .padding(.horizontal, 4)
             .padding(.top, 4)
     }
@@ -569,11 +625,14 @@ struct ProfileView: View {
                 ScandiumTheme.bgPrimary.ignoresSafeArea()
 
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Nhập mã OAuth Token hoặc dán đường dẫn trang cá nhân SoundCloud (ví dụ: soundcloud.com/user).")
-                        .font(.system(size: 14))
-                        .foregroundColor(ScandiumTheme.subtext)
+                    Text(settings.loc(
+                        "Nhập mã OAuth Token hoặc dán đường dẫn trang cá nhân công khai (ví dụ: soundcloud.com/user).",
+                        "Enter OAuth Token or paste public profile link (e.g. soundcloud.com/user)."
+                    ))
+                    .font(.system(size: 14))
+                    .foregroundColor(ScandiumTheme.subtext)
 
-                    TextField("OAuth Token hoặc link Profile...", text: $manualAuthInput)
+                    TextField(settings.loc("OAuth Token hoặc link hồ sơ...", "OAuth Token or profile link..."), text: $manualAuthInput)
                         .font(.system(size: 15))
                         .foregroundColor(ScandiumTheme.textPrimary)
                         .padding(12)
@@ -591,10 +650,10 @@ struct ProfileView: View {
                             } else {
                                 await auth.handleOAuthToken(input)
                             }
-                            showToast("Đã cập nhật thông tin tài khoản!")
+                            showToast(settings.loc("Đã cập nhật thông tin tài khoản!", "Account info updated!"))
                         }
                     }) {
-                        Text("Lưu & Kết nối")
+                        Text(settings.loc("Lưu & Kết nối", "Save & Connect"))
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.black)
                             .frame(maxWidth: .infinity)
@@ -608,7 +667,7 @@ struct ProfileView: View {
                     }) {
                         HStack(spacing: 8) {
                             Image(systemName: "questionmark.circle")
-                            Text("Xem hướng dẫn lấy OAuth Token trên PC & iOS")
+                            Text(settings.loc("Xem hướng dẫn lấy OAuth Token trên PC & iOS", "Guide to obtain OAuth Token on PC & iOS"))
                                 .font(.system(size: 13, weight: .medium))
                         }
                         .foregroundColor(ScandiumTheme.subtext)
@@ -619,11 +678,11 @@ struct ProfileView: View {
                 }
                 .padding(20)
             }
-            .navigationTitle("Tài khoản SoundCloud")
+            .navigationTitle(settings.loc("Đồng bộ tài khoản", "Account Sync"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Đóng") {
+                    Button(settings.loc("Đóng", "Close")) {
                         showManualAuthModal = false
                     }
                     .foregroundColor(ScandiumTheme.textPrimary)
@@ -641,11 +700,14 @@ struct ProfileView: View {
                 ScandiumTheme.bgPrimary.ignoresSafeArea()
 
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Nhập chuỗi 32 ký tự Client ID đã lấy từ SoundCloud để sử dụng riêng cho app.")
-                        .font(.system(size: 14))
-                        .foregroundColor(ScandiumTheme.subtext)
+                    Text(settings.loc(
+                        "Nhập chuỗi 32 ký tự Service Token / Client ID để sử dụng riêng cho app.",
+                        "Enter 32-character Service Token / Client ID for the app."
+                    ))
+                    .font(.system(size: 14))
+                    .foregroundColor(ScandiumTheme.subtext)
 
-                    TextField("Chuỗi 32 ký tự...", text: $manualClientIDInput)
+                    TextField(settings.loc("Chuỗi 32 ký tự...", "32-character key..."), text: $manualClientIDInput)
                         .font(.system(size: 15, design: .monospaced))
                         .foregroundColor(ScandiumTheme.textPrimary)
                         .padding(12)
@@ -656,9 +718,9 @@ struct ProfileView: View {
                         Button(action: {
                             scraper.setManualClientID(manualClientIDInput)
                             showManualIDModal = false
-                            showToast("Đã lưu Client ID thủ công!")
+                            showToast(settings.loc("Đã lưu Client ID thủ công!", "Manual Client ID saved!"))
                         }) {
-                            Text("Lưu Client ID")
+                            Text(settings.loc("Lưu Client ID", "Save Client ID"))
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundColor(.black)
                                 .frame(maxWidth: .infinity)
@@ -672,9 +734,9 @@ struct ProfileView: View {
                                 scraper.setManualClientID(nil)
                                 manualClientIDInput = ""
                                 showManualIDModal = false
-                                showToast("Đã khôi phục Client ID tự động")
+                                showToast(settings.loc("Đã khôi phục Client ID tự động", "Auto Client ID restored"))
                             }) {
-                                Text("Khôi phục")
+                                Text(settings.loc("Khôi phục", "Reset"))
                                     .font(.system(size: 15, weight: .semibold))
                                     .foregroundColor(ScandiumTheme.textPrimary)
                                     .frame(maxWidth: .infinity)
@@ -689,11 +751,11 @@ struct ProfileView: View {
                 }
                 .padding(20)
             }
-            .navigationTitle("Cấu hình Client ID")
+            .navigationTitle(settings.loc("Cấu hình Client ID", "Client ID Configuration"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Đóng") {
+                    Button(settings.loc("Đóng", "Close")) {
                         showManualIDModal = false
                     }
                     .foregroundColor(ScandiumTheme.textPrimary)
@@ -719,37 +781,40 @@ struct ClientIDGuideSheet: View {
 
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 20) {
-                        Text("Hướng dẫn lấy Client ID thủ công")
+                        Text(settings.loc("Hướng dẫn lấy Client ID thủ công", "Manual Client ID Guide"))
                             .font(.system(size: 20, weight: .bold))
                             .foregroundColor(ScandiumTheme.textPrimary)
 
-                        Text("Nếu việc cào tự động gặp trục trặc do mạng chặn, bạn có thể tự lấy Client ID từ máy tính theo 4 bước cực kỳ đơn giản sau:")
-                            .font(.system(size: 14))
-                            .foregroundColor(ScandiumTheme.subtext)
+                        Text(settings.loc(
+                            "Nếu việc đồng bộ tự động gặp sự cố do mạng chặn, bạn có thể tự lấy Client ID từ máy tính theo 4 bước sau:",
+                            "If automatic sync is blocked by network, you can extract Client ID from PC in 4 simple steps:"
+                        ))
+                        .font(.system(size: 14))
+                        .foregroundColor(ScandiumTheme.subtext)
 
                         VStack(spacing: 16) {
                             stepRow(
                                 stepNumber: "1",
-                                title: "Mở SoundCloud trên trình duyệt máy tính",
-                                desc: "Dùng Chrome, Safari, Firefox hoặc Edge truy cập trang soundcloud.com."
+                                title: settings.loc("Mở SoundCloud trên trình duyệt máy tính", "Open SoundCloud in PC browser"),
+                                desc: settings.loc("Dùng Chrome, Safari, Firefox hoặc Edge truy cập trang soundcloud.com.", "Use Chrome, Safari, Firefox or Edge to visit soundcloud.com.")
                             )
 
                             stepRow(
                                 stepNumber: "2",
-                                title: "Mở DevTools & tab Network",
-                                desc: "Nhấn F12 (hoặc Ctrl+Shift+I / Cmd+Option+I), chuyển sang tab Network (Mạng) và gõ 'client_id' vào ô tìm kiếm/lọc."
+                                title: settings.loc("Mở DevTools & tab Network", "Open DevTools & Network tab"),
+                                desc: settings.loc("Nhấn F12 (hoặc Ctrl+Shift+I / Cmd+Option+I), chuyển sang tab Network và gõ 'client_id' vào ô lọc.", "Press F12 (or Ctrl+Shift+I / Cmd+Option+I), switch to Network tab and filter 'client_id'.")
                             )
 
                             stepRow(
                                 stepNumber: "3",
-                                title: "Bấm phát 1 bài nhạc bất kỳ",
-                                desc: "Bấm Play bài hát bất kỳ trên web, các request gọi đến api-v2.soundcloud.com sẽ xuất hiện kèm tham số '?client_id=XXXXXX...'."
+                                title: settings.loc("Bấm phát một bài nhạc bất kỳ", "Play any track"),
+                                desc: settings.loc("Bấm Play bài hát bất kỳ trên web, các request gọi đến dịch vụ mạng (Public API) sẽ xuất hiện kèm tham số '?client_id=...'.", "Play any track on web; requests to public network API will appear with '?client_id=...'.")
                             )
 
                             stepRow(
                                 stepNumber: "4",
-                                title: "Copy chuỗi 32 ký tự và dán vào Scandium",
-                                desc: "Copy chuỗi 32 ký tự chữ và số đó, quay lại Scandium và dán vào mục 'Cấu hình Client ID thủ công'."
+                                title: settings.loc("Sao chép chuỗi 32 ký tự và dán vào Scandium", "Copy 32-character key and paste into Scandium"),
+                                desc: settings.loc("Sao chép chuỗi 32 ký tự chữ và số, quay lại Scandium và dán vào mục 'Cấu hình Client ID thủ công'.", "Copy the 32-character alphanumeric key, return to Scandium and paste into manual configuration.")
                             )
                         }
 
@@ -761,7 +826,7 @@ struct ClientIDGuideSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Đã hiểu") {
+                    Button(settings.loc("Đã hiểu", "Got it")) {
                         presentationMode.wrappedValue.dismiss()
                     }
                     .foregroundColor(ScandiumTheme.spotifyGreen)

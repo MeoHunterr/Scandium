@@ -35,8 +35,11 @@ struct SettingsSheetView: View {
                         // 5. Storage & Cache
                         storageSection
 
-                        // 6. About Section (Without build platform)
+                        // 6. About Section
                         aboutSection
+
+                        // 7. FOSS Disclaimer
+                        fossDisclaimerView
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 20)
@@ -58,12 +61,12 @@ struct SettingsSheetView: View {
             }
             .alert(isPresented: $showClearCacheAlert) {
                 Alert(
-                    title: Text(settings.loc("Xóa bộ nhớ đệm?", "Clear cache?")),
-                    message: Text(settings.loc("Giải phóng ảnh bìa và file tạm thời. Danh sách bài hát của bạn sẽ được giữ nguyên.", "Frees cached artwork and temp audio. Your library is kept safe.")),
-                    primaryButton: .destructive(Text(settings.loc("Xóa ngay", "Clear Now"))) {
+                    title: Text(settings.loc("Dọn sạch cache tạm?", "Clear temporary cache?")),
+                    message: Text(settings.loc("Giải phóng ảnh bìa và file âm thanh tạm thời. Danh sách bài hát của bạn sẽ được giữ nguyên.", "Frees cached artwork and temp audio. Your library is kept safe.")),
+                    primaryButton: .destructive(Text(settings.loc("Dọn sạch ngay", "Clear Now"))) {
                         storage.clearCache()
                         ImageCacheStore.shared.clear()
-                        showToast(settings.loc("Đã dọn dẹp bộ nhớ đệm!", "Cache cleared successfully!"))
+                        showToast(settings.loc("Đã dọn sạch cache tạm!", "Temporary cache cleared!"))
                     },
                     secondaryButton: .cancel(Text(settings.loc("Hủy", "Cancel")))
                 )
@@ -79,7 +82,7 @@ struct SettingsSheetView: View {
 
     private var themeSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader(title: settings.loc("GIAO DIỆN & MÀU SẮC", "APPEARANCE & THEME"))
+            sectionHeader(title: settings.loc("Giao diện & Màu sắc", "Appearance & Theme"))
 
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
@@ -141,7 +144,7 @@ struct SettingsSheetView: View {
 
     private var languageSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader(title: settings.loc("NGÔN NGỮ HIỂN THỊ", "DISPLAY LANGUAGE"))
+            sectionHeader(title: settings.loc("Ngôn ngữ hiển thị", "Display Language"))
 
             VStack(spacing: 0) {
                 ForEach(AppLanguage.allCases) { lang in
@@ -191,7 +194,7 @@ struct SettingsSheetView: View {
 
     private var audioQualitySection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader(title: settings.loc("CHẤT LƯỢNG PHÁT TRỰC TUYẾN", "AUDIO STREAMING QUALITY"))
+            sectionHeader(title: settings.loc("Chất lượng âm thanh", "Audio Quality"))
 
             VStack(spacing: 0) {
                 ForEach(AudioQualitySetting.allCases) { q in
@@ -232,7 +235,7 @@ struct SettingsSheetView: View {
 
     private var playbackSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader(title: settings.loc("TRẢI NGHIỆM PHÁT NHẠC", "PLAYBACK EXPERIENCE"))
+            sectionHeader(title: settings.loc("Trải nghiệm phát nhạc", "Playback Experience"))
 
             VStack(spacing: 0) {
                 // Autoplay
@@ -276,12 +279,12 @@ struct SettingsSheetView: View {
 
     private var storageSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader(title: settings.loc("BỘ NHỚ & DỮ LIỆU ĐỆM", "STORAGE & CACHE"))
+            sectionHeader(title: settings.loc("Bộ nhớ đệm & Dữ liệu", "Storage & Cache"))
 
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(settings.loc("Dung lượng bộ nhớ đệm", "Current Cache Usage"))
+                        Text(settings.loc("Bộ nhớ đệm & Dữ liệu", "Storage & Cache"))
                             .font(.system(size: 15, weight: .medium))
                             .foregroundColor(ScandiumTheme.textPrimary)
                         Text(storage.formattedTotal)
@@ -294,7 +297,7 @@ struct SettingsSheetView: View {
                     Button(action: {
                         showClearCacheAlert = true
                     }) {
-                        Text(settings.loc("Xóa đệm", "Clear"))
+                        Text(settings.loc("Dọn dẹp", "Clean"))
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.orange)
                             .padding(.horizontal, 12)
@@ -311,11 +314,11 @@ struct SettingsSheetView: View {
         }
     }
 
-    // MARK: - 6. About Section (No Build Platform)
+    // MARK: - 6. About Section
 
     private var aboutSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader(title: settings.loc("THÔNG TIN", "ABOUT"))
+            sectionHeader(title: settings.loc("Thông tin ứng dụng", "About Scandium"))
 
             VStack(spacing: 0) {
                 // App Emblem Row
@@ -330,10 +333,10 @@ struct SettingsSheetView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Scandium")
+                        Text("Scandium [21 Sc]")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundColor(ScandiumTheme.textPrimary)
-                        Text("SoundCloud Music Client • iOS 15+")
+                        Text(settings.loc("Client bên thứ ba cho SoundCloud • iOS 15+", "Unofficial Client for SoundCloud • iOS 15+"))
                             .font(.system(size: 12))
                             .foregroundColor(ScandiumTheme.subtext)
                     }
@@ -350,8 +353,38 @@ struct SettingsSheetView: View {
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(ScandiumTheme.textPrimary)
                     Spacer()
-                    Text("1.1.0")
+                    Text("1.2.0")
                         .font(.system(size: 13))
+                        .foregroundColor(ScandiumTheme.subtext)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+
+                HairlineDivider(leadingPadding: 16)
+
+                // License
+                HStack {
+                    Text(settings.loc("Giấy phép", "License"))
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(ScandiumTheme.textPrimary)
+                    Spacer()
+                    Text("GNU GPL v3.0 (Open Source)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(ScandiumTheme.spotifyGreen)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+
+                HairlineDivider(leadingPadding: 16)
+
+                // Source Code
+                HStack {
+                    Text(settings.loc("Mã nguồn", "Source Code"))
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(ScandiumTheme.textPrimary)
+                    Spacer()
+                    Text("github.com/MeoHunterr/Scandium")
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(ScandiumTheme.subtext)
                 }
                 .padding(.horizontal, 16)
@@ -377,13 +410,26 @@ struct SettingsSheetView: View {
         }
     }
 
+    // MARK: - 7. FOSS Disclaimer
+
+    private var fossDisclaimerView: some View {
+        Text(settings.loc(
+            "Scandium là phần mềm mã nguồn mở độc lập, không liên kết hay được chứng thực bởi SoundCloud Global Limited & Co. KG.",
+            "Scandium is an independent open-source software, not affiliated with or endorsed by SoundCloud Global Limited & Co. KG."
+        ))
+        .font(.system(size: 11))
+        .foregroundColor(ScandiumTheme.subtext.opacity(0.75))
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
+    }
+
     // MARK: - Section Header
 
     private func sectionHeader(title: String) -> some View {
         Text(title)
-            .font(.system(size: 11, weight: .bold))
+            .font(.system(size: 12, weight: .semibold))
             .foregroundColor(ScandiumTheme.subtext)
-            .tracking(1.2)
             .padding(.horizontal, 4)
             .padding(.top, 4)
     }

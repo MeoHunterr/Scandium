@@ -215,14 +215,14 @@ struct LibraryView: View {
         if !auth.isAuthenticated {
             emptyStateView(
                 icon: "music.note.list",
-                title: settings.loc("Chưa đăng nhập SoundCloud", "SoundCloud Not Logged In"),
-                message: settings.loc("Đăng nhập SoundCloud trong mục Cá nhân để tải playlist của bạn.", "Sign in with SoundCloud in Profile to load your playlists.")
+                title: settings.loc("Chưa đồng bộ tài khoản", "Account Not Synchronized"),
+                message: settings.loc("Đồng bộ tài khoản trong mục Cá nhân để tải danh sách phát của bạn.", "Synchronize account in Profile to load your playlists.")
             )
         } else if auth.userPlaylists.isEmpty {
             emptyStateView(
                 icon: "music.note.list",
-                title: settings.loc("Không tìm thấy playlist", "No playlists found"),
-                message: settings.loc("Kéo xuống để tải lại hoặc tạo playlist mới trên SoundCloud.", "Pull down to reload or create new playlists on SoundCloud.")
+                title: settings.loc("Không tìm thấy danh sách phát", "No playlists found"),
+                message: settings.loc("Kéo xuống để tải lại hoặc tạo danh sách phát mới trên tài khoản của bạn.", "Pull down to reload or create new playlists in your account.")
             )
         } else {
             LazyVStack(spacing: 8) {
@@ -240,8 +240,8 @@ struct LibraryView: View {
         if !auth.isAuthenticated {
             emptyStateView(
                 icon: "opticaldisc",
-                title: settings.loc("Chưa đăng nhập SoundCloud", "SoundCloud Not Logged In"),
-                message: settings.loc("Đăng nhập SoundCloud để duyệt album và EP của bạn.", "Sign in with SoundCloud to browse your albums and EPs.")
+                title: settings.loc("Chưa đồng bộ tài khoản", "Account Not Synchronized"),
+                message: settings.loc("Đồng bộ tài khoản để duyệt album và EP của bạn.", "Synchronize account to browse your albums and EPs.")
             )
         } else if auth.userAlbums.isEmpty {
             emptyStateView(
@@ -313,14 +313,14 @@ struct LibraryView: View {
         if !auth.isAuthenticated {
             emptyStateView(
                 icon: "person.crop.circle.badge.plus",
-                title: settings.loc("Chưa đăng nhập SoundCloud", "SoundCloud Not Logged In"),
-                message: settings.loc("Đăng nhập để xem danh sách nghệ sĩ bạn đang theo dõi.", "Sign in to see artists you are following.")
+                title: settings.loc("Chưa đồng bộ tài khoản", "Account Not Synchronized"),
+                message: settings.loc("Đồng bộ tài khoản để xem danh sách nghệ sĩ bạn đang theo dõi.", "Synchronize account to see artists you are following.")
             )
         } else if auth.userFollowings.isEmpty {
             emptyStateView(
                 icon: "person.2",
                 title: settings.loc("Chưa theo dõi nghệ sĩ nào", "No followed artists"),
-                message: settings.loc("Kéo xuống để đồng bộ các nghệ sĩ bạn theo dõi trên SoundCloud.", "Pull down to sync artists you follow on SoundCloud.")
+                message: settings.loc("Kéo xuống để đồng bộ các nghệ sĩ bạn theo dõi.", "Pull down to sync artists you follow.")
             )
         } else {
             LazyVStack(spacing: 8) {
@@ -381,7 +381,7 @@ struct LibraryView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(ScandiumTheme.subtext)
                 Spacer()
-                Button(settings.loc("Xóa lịch sử", "Clear History")) {
+                Button(settings.loc("Dọn lịch sử", "Clear History")) {
                     library.clearRecentlyPlayed()
                 }
                 .font(.system(size: 12, weight: .semibold))
