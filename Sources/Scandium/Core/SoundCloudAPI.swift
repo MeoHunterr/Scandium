@@ -161,6 +161,42 @@ final class SoundCloudAPI: ObservableObject {
         return []
     }
 
+    /// Fetches related / recommended tracks for a given track ID
+    func getRelatedTracks(trackID: Int, limit: Int = 15) async throws -> [Track] {
+        let clientID = try await scraper.getClientID()
+        let urlString = "\(Self.baseURL)/tracks/\(trackID)/related?client_id=\(clientID)&limit=\(limit)"
+
+        let response = try await performRequest(
+            urlString: urlString,
+            decodeAs: SearchResponse.self,
+            retryCount: 0
+        )
+        return response.collection
+    }
+
+    /// Fetches the authenticated user's stream / feed
+    func getUserStream(oauthToken: String, limit: Int = 20) async throws -> [Track] {
+        let clientID = try await scraper.getClientID()
+        let urlString = "\(Self.baseURL)/stream?client_id=\(clientID)&limit=\(limit)"
+        let headers = ["Authorization": "OAuth \(oauthToken)"]
+
+        let data = try await performRawRequest(urlString: urlString, headers: headers)
+        if let direct = try? JSONDecoder().decode(SearchResponse.self, from: data) {
+            return direct.collection
+        }
+
+        struct StreamItem: Codable {
+            let track: Track?
+        }
+        struct StreamResponse: Codable {
+            let collection: [StreamItem]
+        }
+        if let streamRes = try? JSONDecoder().decode(StreamResponse.self, from: data) {
+            return streamRes.collection.compactMap { $0.track }
+        }
+        return []
+    }
+
     // MARK: - Generic Networking Helper
 
     private func performRequest<T: Decodable>(

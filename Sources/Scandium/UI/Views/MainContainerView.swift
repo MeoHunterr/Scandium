@@ -9,12 +9,12 @@ enum ScandiumTab: Int, CaseIterable {
     case library = 2
     case profile = 3
 
-    var title: String {
+    func title(settings: AppSettings) -> String {
         switch self {
-        case .home: return "Trang chủ"
-        case .search: return "Tìm kiếm"
-        case .library: return "Thư viện"
-        case .profile: return "Cá nhân"
+        case .home: return settings.loc("Trang chủ", "Home")
+        case .search: return settings.loc("Tìm kiếm", "Search")
+        case .library: return settings.loc("Thư viện", "Library")
+        case .profile: return settings.loc("Cá nhân", "Profile")
         }
     }
 
@@ -33,6 +33,7 @@ struct MainContainerView: View {
     @EnvironmentObject var api: SoundCloudAPI
     @EnvironmentObject var scraper: ClientIDScraper
     @EnvironmentObject var library: LibraryManager
+    @ObservedObject private var settings = AppSettings.shared
 
     @State private var selectedTab: ScandiumTab = .home
     @State private var showFullPlayer: Bool = false
@@ -64,7 +65,7 @@ struct MainContainerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .ignoresSafeArea(.container, edges: .bottom)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(settings.themeMode.colorScheme)
         .fullScreenCover(isPresented: $showFullPlayer) {
             FullPlayerView()
                 .environmentObject(player)
@@ -116,11 +117,11 @@ struct MainContainerView: View {
                         VStack(spacing: 4) {
                             Image(systemName: tab.icon)
                                 .font(.system(size: 20, weight: selectedTab == tab ? .semibold : .light))
-                                .foregroundColor(selectedTab == tab ? .white : ScandiumTheme.subtext)
+                                .foregroundColor(selectedTab == tab ? ScandiumTheme.textPrimary : ScandiumTheme.subtext)
 
-                            Text(tab.title)
+                            Text(tab.title(settings: settings))
                                 .font(.system(size: 10, weight: selectedTab == tab ? .semibold : .regular))
-                                .foregroundColor(selectedTab == tab ? .white : ScandiumTheme.subtext)
+                                .foregroundColor(selectedTab == tab ? ScandiumTheme.textPrimary : ScandiumTheme.subtext)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.top, 8)
@@ -136,7 +137,7 @@ struct MainContainerView: View {
                 Rectangle()
                     .fill(.ultraThinMaterial)
                 Rectangle()
-                    .fill(Color.black.opacity(0.85))
+                    .fill(ScandiumTheme.bgPrimary.opacity(0.85))
             }
         )
     }

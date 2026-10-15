@@ -10,6 +10,7 @@ struct ScandiumApp: App {
     @StateObject private var api: SoundCloudAPI
     @StateObject private var player: AudioPlayerEngine
     @StateObject private var library: LibraryManager
+    @ObservedObject private var settings = AppSettings.shared
 
     /// Controls the staged launch: start with a black screen, then mount MainContainerView
     @State private var isUIReady: Bool = false
@@ -73,7 +74,7 @@ struct ScandiumApp: App {
                         .transition(.opacity)
                 }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(settings.themeMode.colorScheme)
             .onAppear {
                 // Phase 1: Window is now ready — check for previous crash, then mount UI
                 let hadCrash = CrashDiagnosticManager.shared.didCrashDuringLastLaunch
@@ -99,10 +100,7 @@ struct ScandiumApp: App {
         withAnimation(.easeIn(duration: 0.25)) {
             isUIReady = true
         }
-        // Mark launch as successful after UI has been stable for 3 seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            CrashDiagnosticManager.shared.markLaunchSucceeded()
-        }
+        CrashDiagnosticManager.shared.markLaunchSucceeded()
     }
 
     private func configureAppearance() {

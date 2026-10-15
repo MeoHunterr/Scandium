@@ -65,6 +65,13 @@ fi
 echo "       Found: ${APP_BUNDLE}"
 echo ""
 
+# Copy icon assets
+if [ -d "${PROJECT_ROOT}/assets" ]; then
+    cp -f "${PROJECT_ROOT}/assets/"*.png "${APP_BUNDLE}/" 2>/dev/null || true
+    echo "       Copied Scandium AppIcon assets into ${APP_BUNDLE}"
+fi
+echo ""
+
 # -------------------------------------------------------------------
 # Step 3: Patch Mach-O headers (weak-link SwiftUICore & iOS 18+ libs)
 # -------------------------------------------------------------------

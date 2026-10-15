@@ -28,14 +28,11 @@ final class CrashDiagnosticManager {
 
     /// Mark that the app is currently launching. Call right before mounting MainContainerView.
     func markLaunchStarted() {
-        UserDefaults.standard.set(true, forKey: launchFlagKey)
-        UserDefaults.standard.synchronize()
+        // No-op to avoid false positives when app is killed or suspended
     }
 
-    /// Mark that the UI is stable. Call 2 seconds after UI appears.
+    /// Mark that the UI is stable.
     func markLaunchSucceeded() {
-        UserDefaults.standard.set(false, forKey: launchFlagKey)
-        UserDefaults.standard.synchronize()
         deleteCrashLog()
     }
 
@@ -46,19 +43,15 @@ final class CrashDiagnosticManager {
         return FileManager.default.fileExists(atPath: url.path)
     }
 
-    /// Returns true if the launch flag was set (app crashed mid-launch last time).
+    /// Returns true only if an actual crash log file was written by signal or exception handlers.
     var didCrashDuringLastLaunch: Bool {
-        let wasLaunching = UserDefaults.standard.bool(forKey: launchFlagKey)
-        return wasLaunching || hasPreviousCrash
+        return hasPreviousCrash
     }
 
     /// Reads the crash log content for display in Safe Mode UI.
     func readCrashLog() -> String {
         guard let url = crashLogURL,
               let content = try? String(contentsOf: url, encoding: .utf8) else {
-            if UserDefaults.standard.bool(forKey: launchFlagKey) {
-                return "App bị crash trong quá trình khởi động (launch flag còn bật).\nKhông có stack trace chi tiết."
-            }
             return "Không có log crash."
         }
         return content

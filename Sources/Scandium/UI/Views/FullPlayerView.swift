@@ -108,7 +108,7 @@ struct FullPlayerView: View {
 
                 Spacer()
 
-                Text("ĐANG PHÁT")
+                Text(AppSettings.shared.loc("ĐANG PHÁT", "NOW PLAYING"))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(ScandiumTheme.subtext)
                     .tracking(1.5)
@@ -140,7 +140,7 @@ struct FullPlayerView: View {
     private var trackInfoSection: some View {
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(player.currentTrack?.title ?? "Chưa chọn bài hát")
+                Text(player.currentTrack?.title ?? AppSettings.shared.loc("Chưa chọn bài hát", "No track selected"))
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(.white)
                     .lineLimit(1)
@@ -380,11 +380,11 @@ struct QueueSheetView: View {
             VStack(spacing: 0) {
                 // Header
                 HStack {
-                    Text("Danh sách phát")
+                    Text(AppSettings.shared.loc("Danh sách phát", "Playback Queue"))
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(ScandiumTheme.textPrimary)
                     Spacer()
-                    Button("Xong") {
+                    Button(AppSettings.shared.loc("Xong", "Done")) {
                         presentationMode.wrappedValue.dismiss()
                     }
                     .foregroundColor(ScandiumTheme.spotifyGreen)
@@ -401,7 +401,7 @@ struct QueueSheetView: View {
                         Image(systemName: "music.note.list")
                             .font(.system(size: 40))
                             .foregroundColor(ScandiumTheme.subtext.opacity(0.5))
-                        Text("Danh sách phát trống")
+                        Text(AppSettings.shared.loc("Danh sách phát trống", "Queue is empty"))
                             .font(.subheadline)
                             .foregroundColor(ScandiumTheme.subtext)
                         Spacer()

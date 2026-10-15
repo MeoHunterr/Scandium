@@ -18,6 +18,8 @@ struct SearchView: View {
     @State private var selectedFilter: String = "Tất cả"
     @State private var searchHistory: [String] = []
 
+    @ObservedObject private var settings = AppSettings.shared
+
     private let quickTags = ["Tất cả", "V-Pop", "Chill & Lo-Fi", "EDM Remix", "R&B", "Acoustic", "Podcast"]
     private static let searchHistoryKey = "scandium_search_history_v1"
     private static let maxSearchHistory = 12
@@ -40,9 +42,9 @@ struct SearchView: View {
 
     private var headerView: some View {
         HStack {
-            Text("Tìm kiếm")
+            Text(settings.loc("Tìm kiếm", "Search"))
                 .font(.system(size: 26, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(ScandiumTheme.textPrimary)
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -59,12 +61,12 @@ struct SearchView: View {
 
             ZStack(alignment: .leading) {
                 if searchText.isEmpty {
-                    Text("Tìm bài hát, nghệ sĩ...")
+                    Text(settings.loc("Tìm bài hát, nghệ sĩ...", "Search songs, artists..."))
                         .font(.system(size: 15))
                         .foregroundColor(ScandiumTheme.subtext.opacity(0.6))
                 }
                 TextField("", text: $searchText)
-                    .foregroundColor(.white)
+                    .foregroundColor(ScandiumTheme.textPrimary)
                     .font(.system(size: 15))
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
@@ -89,7 +91,7 @@ struct SearchView: View {
 
             if isLoading {
                 ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .progressViewStyle(CircularProgressViewStyle(tint: ScandiumTheme.textPrimary))
                     .scaleEffect(0.7)
             }
         }
@@ -116,12 +118,12 @@ struct SearchView: View {
                     }) {
                         Text(tag)
                             .font(.system(size: 12, weight: selectedFilter == tag ? .bold : .medium))
-                            .foregroundColor(selectedFilter == tag ? .black : .white)
+                            .foregroundColor(selectedFilter == tag ? (ScandiumTheme.isDark ? .black : .white) : ScandiumTheme.textPrimary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
                             .background(
                                 Capsule()
-                                    .fill(selectedFilter == tag ? Color.white : ScandiumTheme.surfaceElevated)
+                                    .fill(selectedFilter == tag ? ScandiumTheme.textPrimary : ScandiumTheme.surfaceElevated)
                             )
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -178,7 +180,7 @@ struct SearchView: View {
             HStack {
                 Spacer()
                 ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .progressViewStyle(CircularProgressViewStyle(tint: ScandiumTheme.textPrimary))
                     .padding(.vertical, 16)
                 Spacer()
             }
@@ -192,12 +194,12 @@ struct SearchView: View {
             if !searchHistory.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("Tìm kiếm gần đây")
+                        Text(settings.loc("Tìm kiếm gần đây", "Recent Searches"))
                             .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.white)
+                            .foregroundColor(ScandiumTheme.textPrimary)
                         Spacer()
                         Button(action: clearSearchHistory) {
-                            Text("Xóa tất cả")
+                            Text(settings.loc("Xóa tất cả", "Clear All"))
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundColor(ScandiumTheme.subtext)
                         }
@@ -220,7 +222,7 @@ struct SearchView: View {
 
                                         Text(item)
                                             .font(.system(size: 15, weight: .regular))
-                                            .foregroundColor(.white)
+                                            .foregroundColor(ScandiumTheme.textPrimary)
                                             .lineLimit(1)
 
                                         Spacer()
@@ -258,11 +260,11 @@ struct SearchView: View {
                         .font(.system(size: 42, weight: .light))
                         .foregroundColor(ScandiumTheme.subtext.opacity(0.4))
 
-                    Text("Tìm bài hát yêu thích")
+                    Text(settings.loc("Tìm bài hát yêu thích", "Find your favorite music"))
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(ScandiumTheme.textPrimary)
 
-                    Text("Nhập từ khóa hoặc chọn một thể loại ở trên để bắt đầu nghe nhạc.")
+                    Text(settings.loc("Nhập từ khóa hoặc chọn một thể loại ở trên để bắt đầu nghe nhạc.", "Type keywords or select a genre above to start listening."))
                         .font(.system(size: 13))
                         .foregroundColor(ScandiumTheme.subtext)
                         .multilineTextAlignment(.center)
@@ -286,11 +288,11 @@ struct SearchView: View {
                 .font(.system(size: 38, weight: .light))
                 .foregroundColor(ScandiumTheme.subtext.opacity(0.4))
 
-            Text("Không tìm thấy kết quả")
+            Text(settings.loc("Không tìm thấy kết quả", "No results found"))
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(ScandiumTheme.textPrimary)
 
-            Text("Hãy thử tìm kiếm với tên bài hát hoặc ca sĩ khác.")
+            Text(settings.loc("Hãy thử tìm kiếm với tên bài hát hoặc ca sĩ khác.", "Try searching for a different song or artist."))
                 .font(.system(size: 13))
                 .foregroundColor(ScandiumTheme.subtext)
         }

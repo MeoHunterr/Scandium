@@ -385,6 +385,22 @@ final class AudioPlayerEngine: ObservableObject {
         }
         if currentIndex + 1 < queue.count || isShuffleEnabled {
             nextTrack()
+        } else if AppSettings.shared.autoPlayRelated, let current = currentTrack {
+            Task {
+                if let related = try? await api.getRelatedTracks(trackID: current.id, limit: 5),
+                   let next = related.first(where: { $0.id != current.id }) {
+                    await MainActor.run {
+                        self.enqueue(next)
+                        self.nextTrack()
+                    }
+                } else {
+                    await MainActor.run {
+                        self.playbackState = .paused
+                        self.currentTime = self.duration
+                        self.updateNowPlayingElapsedTime()
+                    }
+                }
+            }
         } else {
             playbackState = .paused
             currentTime = duration

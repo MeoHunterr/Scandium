@@ -6,20 +6,45 @@ import SwiftUI
 // MARK: - Design Tokens (Threads x Spotify)
 
 enum ScandiumTheme {
-    // True OLED Black & Deep Charcoal Surfaces
-    static let bgPrimary = Color.black                                      // #000000
-    static let surfaceDark = Color(red: 0.071, green: 0.071, blue: 0.071)   // #121212
-    static let surfaceCard = Color(red: 0.094, green: 0.094, blue: 0.094)   // #181818
-    static let surfaceElevated = Color(red: 0.110, green: 0.110, blue: 0.118) // #1C1C1E
+    static var isDark: Bool {
+        AppSettings.shared.isDark
+    }
+
+    // Dynamic surfaces based on theme
+    static var bgPrimary: Color {
+        isDark ? Color.black : Color(red: 0.95, green: 0.95, blue: 0.97)
+    }
+
+    static var surfaceDark: Color {
+        isDark ? Color(red: 0.071, green: 0.071, blue: 0.071) : Color(red: 0.91, green: 0.91, blue: 0.93)
+    }
+
+    static var surfaceCard: Color {
+        isDark ? Color(red: 0.094, green: 0.094, blue: 0.094) : Color.white
+    }
+
+    static var surfaceElevated: Color {
+        isDark ? Color(red: 0.110, green: 0.110, blue: 0.118) : Color(red: 0.88, green: 0.88, blue: 0.90)
+    }
+
+    // Dynamic text
+    static var textPrimary: Color {
+        isDark ? Color.white : Color(red: 0.1, green: 0.1, blue: 0.1)
+    }
+
+    static var subtext: Color {
+        isDark ? Color(red: 0.655, green: 0.655, blue: 0.655) : Color(red: 0.45, green: 0.45, blue: 0.48)
+    }
 
     // Hairline divider
-    static let hairline = Color.white.opacity(0.08)
+    static var hairline: Color {
+        isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.10)
+    }
     static let hairlinewidth: CGFloat = 0.5
 
     // Accents
     static let spotifyGreen = Color(red: 29/255, green: 185/255, blue: 84/255) // #1DB954
     static let accentOrange = Color(red: 1.0, green: 0.35, blue: 0.12)
-    static let subtext = Color(red: 0.655, green: 0.655, blue: 0.655)        // #A7A7A7
     static let pureWhite = Color.white
 
     // Dimensions
@@ -323,7 +348,7 @@ struct ThreadsRow<TrailingContent: View>: View {
 
     init(
         icon: String,
-        iconColor: Color = .white,
+        iconColor: Color = ScandiumTheme.textPrimary,
         title: String,
         subtitle: String? = nil,
         showDivider: Bool = true,
@@ -348,7 +373,7 @@ struct ThreadsRow<TrailingContent: View>: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 16, weight: .regular))
-                        .foregroundColor(.white)
+                        .foregroundColor(ScandiumTheme.textPrimary)
                         .lineLimit(1)
                     if let subtitle = subtitle, !subtitle.isEmpty {
                         Text(subtitle)
@@ -376,7 +401,7 @@ struct ThreadsRow<TrailingContent: View>: View {
 extension ThreadsRow where TrailingContent == AnyView {
     init(
         icon: String,
-        iconColor: Color = .white,
+        iconColor: Color = ScandiumTheme.textPrimary,
         title: String,
         subtitle: String? = nil,
         showDivider: Bool = true

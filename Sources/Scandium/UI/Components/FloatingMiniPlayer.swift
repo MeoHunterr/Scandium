@@ -30,7 +30,7 @@ struct FloatingMiniPlayer: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(track.title)
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.white)
+                                .foregroundColor(ScandiumTheme.textPrimary)
                                 .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -52,7 +52,7 @@ struct FloatingMiniPlayer: View {
                                 let isLiked = library.isLiked(track: track)
                                 Image(systemName: isLiked ? "heart.fill" : "heart")
                                     .font(.system(size: 17, weight: .medium))
-                                    .foregroundColor(isLiked ? ScandiumTheme.spotifyGreen : Color.white.opacity(0.7))
+                                    .foregroundColor(isLiked ? ScandiumTheme.spotifyGreen : ScandiumTheme.subtext)
                             }
                             .buttonStyle(PlainButtonStyle())
 
@@ -62,7 +62,7 @@ struct FloatingMiniPlayer: View {
                             }) {
                                 Image(systemName: player.playbackState.isPlaying ? "pause.fill" : "play.fill")
                                     .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(ScandiumTheme.textPrimary)
                                     .frame(width: 32, height: 32)
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -93,15 +93,15 @@ struct FloatingMiniPlayer: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(.ultraThinMaterial)
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.black.opacity(0.65))
+                        .fill(ScandiumTheme.surfaceElevated.opacity(0.85))
                 }
             )
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                    .stroke(ScandiumTheme.hairline, lineWidth: 0.5)
             )
-            .shadow(color: Color.black.opacity(0.5), radius: 12, x: 0, y: 6)
+            .shadow(color: Color.black.opacity(ScandiumTheme.isDark ? 0.5 : 0.15), radius: 12, x: 0, y: 6)
             .padding(.horizontal, 12)
             .padding(.bottom, 6)
             .transition(.move(edge: .bottom).combined(with: .opacity))

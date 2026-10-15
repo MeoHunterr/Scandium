@@ -38,7 +38,7 @@ struct GlassTrackRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(track.title)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(isCurrentlyPlaying ? ScandiumTheme.spotifyGreen : .white)
+                        .foregroundColor(isCurrentlyPlaying ? ScandiumTheme.spotifyGreen : ScandiumTheme.textPrimary)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -71,7 +71,7 @@ struct GlassTrackRow: View {
                     }) {
                         Image(systemName: isLiked ? "heart.fill" : "heart")
                             .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(isLiked ? ScandiumTheme.spotifyGreen : Color.white.opacity(0.4))
+                            .foregroundColor(isLiked ? ScandiumTheme.spotifyGreen : ScandiumTheme.subtext.opacity(0.5))
                             .frame(width: 32, height: 32)
                     }
                     .buttonStyle(PlainButtonStyle())

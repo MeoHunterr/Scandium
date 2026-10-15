@@ -156,7 +156,7 @@ struct OAuthTokenGuideSheet: View {
                         // Header
                         Text("Hướng dẫn lấy OAuth Token")
                             .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(.white)
+                            .foregroundColor(ScandiumTheme.textPrimary)
 
                         // Segmented control (PC vs iOS)
                         HStack(spacing: 8) {
@@ -166,10 +166,10 @@ struct OAuthTokenGuideSheet: View {
                                     Text("Máy tính (PC/Mac)")
                                 }
                                 .font(.system(size: 13, weight: selectedGuideTab == 0 ? .semibold : .regular))
-                                .foregroundColor(selectedGuideTab == 0 ? .black : .white)
+                                .foregroundColor(selectedGuideTab == 0 ? (ScandiumTheme.isDark ? .black : .white) : ScandiumTheme.textPrimary)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 8)
-                                .background(selectedGuideTab == 0 ? Color.white : ScandiumTheme.surfaceElevated)
+                                .background(selectedGuideTab == 0 ? ScandiumTheme.textPrimary : ScandiumTheme.surfaceElevated)
                                 .clipShape(Capsule())
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -180,10 +180,10 @@ struct OAuthTokenGuideSheet: View {
                                     Text("Trên iPhone")
                                 }
                                 .font(.system(size: 13, weight: selectedGuideTab == 1 ? .semibold : .regular))
-                                .foregroundColor(selectedGuideTab == 1 ? .black : .white)
+                                .foregroundColor(selectedGuideTab == 1 ? (ScandiumTheme.isDark ? .black : .white) : ScandiumTheme.textPrimary)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 8)
-                                .background(selectedGuideTab == 1 ? Color.white : ScandiumTheme.surfaceElevated)
+                                .background(selectedGuideTab == 1 ? ScandiumTheme.textPrimary : ScandiumTheme.surfaceElevated)
                                 .clipShape(Capsule())
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -212,7 +212,7 @@ struct OAuthTokenGuideSheet: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(AppSettings.shared.themeMode.colorScheme)
     }
 
     // MARK: - PC / Mac Guide (Recommended)
@@ -236,7 +236,7 @@ struct OAuthTokenGuideSheet: View {
 
             Text("Cách 1: Lấy qua Cookie trình duyệt (Rất dễ)")
                 .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(ScandiumTheme.textPrimary)
 
             oauthStep(
                 number: "1",
@@ -278,7 +278,7 @@ struct OAuthTokenGuideSheet: View {
 
             Text("Cách 2: Lấy qua Network Request (Dự phòng)")
                 .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(ScandiumTheme.textPrimary)
 
             oauthStep(
                 number: "1",
@@ -307,7 +307,7 @@ struct OAuthTokenGuideSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Cách lấy trực tiếp trên iPhone:")
                 .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(ScandiumTheme.textPrimary)
 
             oauthStep(
                 number: "1",
@@ -355,7 +355,7 @@ struct OAuthTokenGuideSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(ScandiumTheme.textPrimary)
                 Text(detail)
                     .font(.system(size: 12))
                     .foregroundColor(ScandiumTheme.subtext)

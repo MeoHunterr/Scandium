@@ -13,6 +13,7 @@ struct DiscoverView: View {
     let onNavigateToLibrary: () -> Void
 
     @ObservedObject private var store = DiscoverDataStore.shared
+    @ObservedObject private var settings = AppSettings.shared
     @State private var showClientIDSheet: Bool = false
 
     init(
@@ -28,7 +29,7 @@ struct DiscoverView: View {
             RoundedRectangle(cornerRadius: 0, style: .continuous)
                 .fill(Color.white.opacity(0.04))
                 .frame(width: 56, height: 56)
-            Text("Chưa tải được dữ liệu")
+            Text(settings.loc("Chưa tải được dữ liệu", "Unable to load data"))
                 .font(.system(size: 12))
                 .foregroundColor(ScandiumTheme.subtext)
                 .lineLimit(2)
@@ -54,26 +55,38 @@ struct DiscoverView: View {
                 // 2-Column Quick Picks Grid (Spotify style: 56pt height, #181818)
                 quickPicksSection
 
+                // Personalized Carousel (Gợi ý cá nhân theo tài khoản / Client ID / Thư viện)
+                if !store.personalizedTracks.isEmpty || store.isLoading {
+                    carouselSection(
+                        title: store.personalizedTitle,
+                        subtitle: store.personalizedSubtitle,
+                        tracks: store.personalizedTracks
+                    )
+                }
+
                 // Horizontal Carousel: Thịnh hành (Trending)
                 carouselSection(
-                    title: "Thịnh hành hôm nay",
+                    title: settings.loc("Thịnh hành hôm nay", "Trending Today"),
                     tracks: store.trendingTracks
                 )
 
                 // Horizontal Carousel: Chill & R&B
                 carouselSection(
-                    title: "Chill & R&B",
+                    title: settings.loc("Chill & R&B", "Chill & R&B"),
                     tracks: store.chillTracks
                 )
 
                 // Horizontal Carousel: Remix & EDM
                 carouselSection(
-                    title: "Remix sôi động",
+                    title: settings.loc("Remix sôi động", "Remix & Dance"),
                     tracks: store.remixTracks
                 )
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 130) // Ensure content is never hidden behind floating player & tab bar
+        }
+        .refreshable {
+            await store.refresh(api: api)
         }
         .sheet(isPresented: $showClientIDSheet) {
             ClientIDConfigModal(scraper: scraper)
@@ -90,17 +103,32 @@ struct DiscoverView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Scandium")
                     .font(.system(size: 26, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundColor(ScandiumTheme.textPrimary)
             }
 
             Spacer()
 
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
+                // Refresh / Reload Button
+                Button(action: {
+                    Task {
+                        await store.refresh(api: api)
+                    }
+                }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(ScandiumTheme.textPrimary)
+                        .frame(width: 36, height: 36)
+                        .background(ScandiumTheme.surfaceElevated)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(PlainButtonStyle())
+
                 // Search Shortcut
                 Button(action: onNavigateToSearch) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundColor(.white)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(ScandiumTheme.textPrimary)
                         .frame(width: 36, height: 36)
                         .background(ScandiumTheme.surfaceElevated)
                         .clipShape(Circle())
@@ -116,7 +144,7 @@ struct DiscoverView: View {
 
                         Image(systemName: "slider.horizontal.3")
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white.opacity(0.85))
+                            .foregroundColor(ScandiumTheme.textPrimary.opacity(0.85))
                     }
                     .padding(.horizontal, 10)
                     .frame(height: 36)
@@ -179,9 +207,9 @@ struct DiscoverView: View {
                 .frame(width: 56, height: 56)
                 .clipped()
 
-                Text("Bài hát đã thích")
+                Text(settings.loc("Bài hát đã thích", "Liked Songs"))
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(ScandiumTheme.textPrimary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -207,7 +235,7 @@ struct DiscoverView: View {
 
                 Text(track.title)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(player.currentTrack?.id == track.id ? ScandiumTheme.spotifyGreen : .white)
+                    .foregroundColor(player.currentTrack?.id == track.id ? ScandiumTheme.spotifyGreen : ScandiumTheme.textPrimary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -241,11 +269,18 @@ struct DiscoverView: View {
 
     // MARK: - Horizontal Carousel Section (148x148 square cards)
 
-    private func carouselSection(title: String, tracks: [Track]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.white)
+    private func carouselSection(title: String, subtitle: String? = nil, tracks: [Track]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(ScandiumTheme.textPrimary)
+                if let sub = subtitle, !sub.isEmpty {
+                    Text(sub)
+                        .font(.system(size: 12))
+                        .foregroundColor(ScandiumTheme.subtext)
+                }
+            }
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 14) {
@@ -285,7 +320,7 @@ struct DiscoverView: View {
                 // Track title (white, bold)
                 Text(track.title)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(player.currentTrack?.id == track.id ? ScandiumTheme.spotifyGreen : .white)
+                    .foregroundColor(player.currentTrack?.id == track.id ? ScandiumTheme.spotifyGreen : ScandiumTheme.textPrimary)
                     .lineLimit(1)
                     .frame(width: 148, alignment: .leading)
 
@@ -323,11 +358,11 @@ struct DiscoverView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.white.opacity(0.04))
                 .frame(width: 148, height: 148)
-            Text("Chưa có dữ liệu")
+            Text(settings.loc("Chưa có dữ liệu", "No data available"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(ScandiumTheme.subtext)
                 .lineLimit(1)
-            Text("Kéo xuống hoặc bấm thử lại")
+            Text(settings.loc("Kéo xuống hoặc bấm thử lại", "Pull down or tap retry"))
                 .font(.system(size: 11))
                 .foregroundColor(ScandiumTheme.subtext.opacity(0.8))
                 .lineLimit(1)
@@ -347,7 +382,7 @@ struct DiscoverView: View {
             Button(action: {
                 store.loadInitialData(api: api, force: true)
             }) {
-                Text("Thử tải lại")
+                Text(settings.loc("Thử tải lại", "Retry"))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.black)
                     .padding(.horizontal, 12)
@@ -370,15 +405,29 @@ final class DiscoverDataStore: ObservableObject {
     static let shared = DiscoverDataStore()
 
     @Published var quickPicks: [Track] = []
+    @Published var personalizedTracks: [Track] = []
+    @Published var personalizedTitle: String = "Dành riêng cho bạn"
+    @Published var personalizedSubtitle: String? = nil
     @Published var trendingTracks: [Track] = []
     @Published var chillTracks: [Track] = []
     @Published var remixTracks: [Track] = []
     @Published var isLoading: Bool = false
+    @Published var isRefreshing: Bool = false
     @Published var error: String?
 
     private var hasLoaded: Bool = false
 
     private init() {}
+
+    func refresh(api: SoundCloudAPI) async {
+        await MainActor.run {
+            self.isRefreshing = true
+        }
+        await loadData(api: api, force: true)
+        await MainActor.run {
+            self.isRefreshing = false
+        }
+    }
 
     func loadInitialData(api: SoundCloudAPI, force: Bool = false) {
         if hasLoaded && !force && (!quickPicks.isEmpty || !trendingTracks.isEmpty) {
@@ -388,35 +437,171 @@ final class DiscoverDataStore: ObservableObject {
             return
         }
 
-        isLoading = true
-        error = nil
-
         Task {
-            async let qp = safeSearch(api: api, query: "EDM Hits", limit: 6)
-            async let tr = safeSearch(api: api, query: "Top Vietnam", limit: 10)
-            async let ch = safeSearch(api: api, query: "Chill R&B", limit: 10)
-            async let rm = safeSearch(api: api, query: "Remix Lo-Fi", limit: 10)
+            await loadData(api: api, force: force)
+        }
+    }
 
-            let (qpTracks, trTracks, chTracks, rmTracks) = await (qp, tr, ch, rm)
+    private func loadData(api: SoundCloudAPI, force: Bool) async {
+        await MainActor.run {
+            self.isLoading = true
+            self.error = nil
+        }
 
-            await MainActor.run {
-                if !qpTracks.isEmpty { self.quickPicks = self.deduplicateTracks(qpTracks) }
-                if !trTracks.isEmpty { self.trendingTracks = self.deduplicateTracks(trTracks) }
-                if !chTracks.isEmpty { self.chillTracks = self.deduplicateTracks(chTracks) }
-                if !rmTracks.isEmpty { self.remixTracks = self.deduplicateTracks(rmTracks) }
-                self.isLoading = false
-                self.hasLoaded = true
+        let auth = SoundCloudAuthManager.shared
+        let library = LibraryManager.shared
 
-                if self.quickPicks.isEmpty && self.trendingTracks.isEmpty && self.chillTracks.isEmpty && self.remixTracks.isEmpty {
-                    self.error = "Không tải được dữ liệu SoundCloud. Hãy thử lại hoặc vào Cấu hình Client ID."
-                }
+        // 1. Personalized Tracks resolution
+        async let persTask = fetchPersonalizedTracks(api: api, auth: auth, library: library, force: force)
+
+        // 2. Dynamic Quick Picks (user favorites + rotating queries with random offset)
+        async let qpTask = fetchQuickPicks(api: api, auth: auth, library: library, force: force)
+
+        // 3. Rotating Curated Sections with random offsets on force refresh
+        let trendingOffset = force ? Int.random(in: 0...5) : 0
+        let chillOffset = force ? Int.random(in: 0...5) : 0
+        let remixOffset = force ? Int.random(in: 0...5) : 0
+
+        async let trTask = safeSearch(api: api, query: "Top Vietnam", limit: 10, offset: trendingOffset)
+        async let chTask = safeSearch(api: api, query: "Chill R&B", limit: 10, offset: chillOffset)
+        async let rmTask = safeSearch(api: api, query: "Remix Lo-Fi", limit: 10, offset: remixOffset)
+
+        let (persResult, qpTracks, trTracks, chTracks, rmTracks) = await (persTask, qpTask, trTask, chTask, rmTask)
+
+        await MainActor.run {
+            self.personalizedTracks = self.deduplicateTracks(persResult.tracks)
+            self.personalizedTitle = persResult.title
+            self.personalizedSubtitle = persResult.subtitle
+
+            if !qpTracks.isEmpty { self.quickPicks = self.deduplicateTracks(qpTracks) }
+            if !trTracks.isEmpty { self.trendingTracks = self.deduplicateTracks(trTracks) }
+            if !chTracks.isEmpty { self.chillTracks = self.deduplicateTracks(chTracks) }
+            if !rmTracks.isEmpty { self.remixTracks = self.deduplicateTracks(rmTracks) }
+
+            self.isLoading = false
+            self.hasLoaded = true
+
+            if self.quickPicks.isEmpty && self.trendingTracks.isEmpty && self.personalizedTracks.isEmpty {
+                self.error = AppSettings.shared.loc(
+                    "Không tải được dữ liệu SoundCloud. Hãy thử lại hoặc vào Cấu hình Client ID.",
+                    "Unable to load SoundCloud data. Please try again or configure Client ID."
+                )
             }
         }
     }
 
-    private func safeSearch(api: SoundCloudAPI, query: String, limit: Int) async -> [Track] {
+    private func fetchQuickPicks(api: SoundCloudAPI, auth: SoundCloudAuthManager, library: LibraryManager, force: Bool) async -> [Track] {
+        var candidatePicks: [Track] = []
+        var seenIDs = Set<Int>()
+
+        // 1. User personalized seeds (favorites, liked, recently played)
+        let userSeeds = (auth.userLikedTracks + library.likedTracks + library.recentlyPlayed).shuffled()
+        for track in userSeeds {
+            if seenIDs.insert(track.id).inserted {
+                candidatePicks.append(track)
+                if candidatePicks.count >= 3 { break }
+            }
+        }
+
+        // 2. Rotating genre queries with randomized offsets to guarantee fresh results on every reload
+        let queryPool = [
+            "V-Pop Hits",
+            "Top Trending",
+            "EDM Festival",
+            "Chill R&B",
+            "Acoustic Pop",
+            "Vietnamese Indie",
+            "Remix Dance",
+            "Deep House",
+            "Lo-Fi Beats"
+        ].shuffled()
+
+        for q in queryPool.prefix(2) {
+            let offset = force ? Int.random(in: 0...10) : 0
+            let fetched = await safeSearch(api: api, query: q, limit: 6, offset: offset)
+            for track in fetched {
+                if seenIDs.insert(track.id).inserted {
+                    candidatePicks.append(track)
+                }
+            }
+        }
+
+        if candidatePicks.isEmpty {
+            let fallback = await safeSearch(api: api, query: "Top Hits", limit: 6, offset: 0)
+            return fallback
+        }
+
+        return Array(candidatePicks.prefix(6))
+    }
+
+    private func fetchPersonalizedTracks(api: SoundCloudAPI, auth: SoundCloudAuthManager, library: LibraryManager, force: Bool) async -> (title: String, subtitle: String?, tracks: [Track]) {
+        let isEn = AppSettings.shared.language == .english
+
+        // Priority 1: User is logged in to SoundCloud with OAuth
+        if auth.isAuthenticated {
+            if let token = auth.oauthToken, !token.isEmpty {
+                do {
+                    let stream = try await api.getUserStream(oauthToken: token, limit: 12)
+                    if !stream.isEmpty {
+                        let username = auth.currentUser?.username ?? (isEn ? "you" : "bạn")
+                        let title = isEn ? "Feed for \(username)" : "Bảng tin của \(username)"
+                        let subtitle = isEn ? "New tracks from artists you follow" : "Bài hát mới từ nghệ sĩ bạn theo dõi"
+                        return (title, subtitle, stream)
+                    }
+                } catch {
+                    // Fall back to liked tracks
+                }
+            }
+
+            if let seed = auth.userLikedTracks.randomElement() {
+                do {
+                    let related = try await api.getRelatedTracks(trackID: seed.id, limit: 12)
+                    if !related.isEmpty {
+                        let title = isEn ? "Recommended for You" : "Gợi ý cho bạn"
+                        let subtitle = isEn ? "Based on '\(seed.title)' you liked" : "Dựa trên '\(seed.title)' bạn đã thích"
+                        return (title, subtitle, related)
+                    }
+                } catch {}
+            }
+        }
+
+        // Priority 2: In-app liked songs
+        if let seed = library.likedTracks.randomElement() {
+            do {
+                let related = try await api.getRelatedTracks(trackID: seed.id, limit: 12)
+                if !related.isEmpty {
+                    let title = isEn ? "Made for You" : "Dành riêng cho bạn"
+                    let subtitle = isEn ? "Inspired by '\(seed.title)'" : "Lấy cảm hứng từ bài '\(seed.title)'"
+                    return (title, subtitle, related)
+                }
+            } catch {}
+        }
+
+        // Priority 3: Recently played songs in history
+        if let seed = library.recentlyPlayed.first {
+            do {
+                let related = try await api.getRelatedTracks(trackID: seed.id, limit: 12)
+                if !related.isEmpty {
+                    let title = isEn ? "Keep Listening" : "Tiếp tục nghe theo gu của bạn"
+                    let subtitle = isEn ? "Suggestions from '\(seed.title)'" : "Gợi ý từ bài '\(seed.title)'"
+                    return (title, subtitle, related)
+                }
+            } catch {}
+        }
+
+        // Priority 4: Dynamic client session recommendations
+        let dynamicQueries = ["Discover Weekly", "Top Electronic", "Acoustic Pop", "Chill Lo-Fi"]
+        let chosenQuery = dynamicQueries.randomElement() ?? "Discover Weekly"
+        let randomOffset = force ? Int.random(in: 0...5) : 0
+        let tracks = await safeSearch(api: api, query: chosenQuery, limit: 12, offset: randomOffset)
+        let title = isEn ? "Discover for You" : "Khám phá dành cho bạn"
+        let subtitle = isEn ? "Suggestions based on your session" : "Gợi ý dựa trên phiên nghe hiện tại"
+        return (title, subtitle, tracks)
+    }
+
+    private func safeSearch(api: SoundCloudAPI, query: String, limit: Int, offset: Int = 0) async -> [Track] {
         do {
-            let response = try await api.searchTracks(query: query, limit: limit)
+            let response = try await api.searchTracks(query: query, limit: limit, offset: offset)
             return response.collection
         } catch {
             return []
@@ -440,6 +625,7 @@ final class DiscoverDataStore: ObservableObject {
 
 struct ClientIDConfigModal: View {
     @ObservedObject var scraper: ClientIDScraper
+    @ObservedObject private var settings = AppSettings.shared
     @Environment(\.presentationMode) var presentationMode
 
     @State private var inputID: String = ""
@@ -465,9 +651,9 @@ struct ClientIDConfigModal: View {
                                 .frame(width: 10, height: 10)
 
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Trạng thái SoundCloud Client ID")
+                                Text(settings.loc("Trạng thái SoundCloud Client ID", "SoundCloud Client ID Status"))
                                     .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(ScandiumTheme.textPrimary)
                                 Text(scraper.statusDescription)
                                     .font(.system(size: 12))
                                     .foregroundColor(ScandiumTheme.subtext)
@@ -481,12 +667,12 @@ struct ClientIDConfigModal: View {
                         // Current ID info
                         if let current = scraper.currentClientID {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("ID hiện hành:")
+                                Text(settings.loc("ID hiện hành:", "Current ID:"))
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundColor(ScandiumTheme.subtext)
                                 Text(current)
                                     .font(.system(size: 13, design: .monospaced))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(ScandiumTheme.textPrimary)
                                     .padding(10)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .background(ScandiumTheme.surfaceElevated)
@@ -503,12 +689,12 @@ struct ClientIDConfigModal: View {
                                     try await scraper.refreshClientID()
                                     await MainActor.run {
                                         isRefreshing = false
-                                        statusToast = "Cào mới thành công!"
+                                        statusToast = settings.loc("Cào mới thành công!", "Refreshed successfully!")
                                     }
                                 } catch {
                                     await MainActor.run {
                                         isRefreshing = false
-                                        statusToast = "Lỗi: \(error.localizedDescription)"
+                                        statusToast = "\(settings.loc("Lỗi", "Error")): \(error.localizedDescription)"
                                     }
                                 }
                             }
@@ -516,15 +702,15 @@ struct ClientIDConfigModal: View {
                             HStack {
                                 if isRefreshing {
                                     ProgressView()
-                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .progressViewStyle(CircularProgressViewStyle(tint: ScandiumTheme.textPrimary))
                                         .scaleEffect(0.8)
                                 } else {
                                     Image(systemName: "arrow.clockwise")
                                 }
-                                Text("Tự động cào lại Client ID")
+                                Text(settings.loc("Tự động cào lại Client ID", "Auto-Scrape Client ID"))
                                     .font(.system(size: 14, weight: .semibold))
                             }
-                            .foregroundColor(.white)
+                            .foregroundColor(ScandiumTheme.textPrimary)
                             .frame(maxWidth: .infinity)
                             .frame(height: 42)
                             .background(ScandiumTheme.surfaceElevated)
@@ -536,13 +722,13 @@ struct ClientIDConfigModal: View {
 
                         // Manual Entry
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Nhập Client ID thủ công")
+                            Text(settings.loc("Nhập Client ID thủ công", "Manual Client ID Entry"))
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.white)
+                                .foregroundColor(ScandiumTheme.textPrimary)
 
-                            TextField("Dán chuỗi 32 ký tự...", text: $inputID)
+                            TextField(settings.loc("Dán chuỗi 32 ký tự...", "Paste 32-character key..."), text: $inputID)
                                 .font(.system(size: 14, design: .monospaced))
-                                .foregroundColor(.white)
+                                .foregroundColor(ScandiumTheme.textPrimary)
                                 .padding(12)
                                 .background(ScandiumTheme.surfaceElevated)
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -552,7 +738,7 @@ struct ClientIDConfigModal: View {
                                     scraper.setManualClientID(inputID)
                                     presentationMode.wrappedValue.dismiss()
                                 }) {
-                                    Text("Lưu Client ID")
+                                    Text(settings.loc("Lưu Client ID", "Save Client ID"))
                                         .font(.system(size: 14, weight: .semibold))
                                         .foregroundColor(.black)
                                         .frame(maxWidth: .infinity)
@@ -567,9 +753,9 @@ struct ClientIDConfigModal: View {
                                         inputID = ""
                                         presentationMode.wrappedValue.dismiss()
                                     }) {
-                                        Text("Khôi phục")
+                                        Text(settings.loc("Khôi phục", "Reset"))
                                             .font(.system(size: 14, weight: .medium))
-                                            .foregroundColor(.white)
+                                            .foregroundColor(ScandiumTheme.textPrimary)
                                             .frame(maxWidth: .infinity)
                                             .frame(height: 40)
                                             .background(ScandiumTheme.surfaceElevated)
@@ -585,7 +771,7 @@ struct ClientIDConfigModal: View {
                         }) {
                             HStack {
                                 Image(systemName: "questionmark.circle")
-                                Text("Xem hướng dẫn lấy Client ID trên máy tính")
+                                Text(settings.loc("Xem hướng dẫn lấy Client ID trên máy tính", "How to extract Client ID from PC"))
                                     .font(.system(size: 13, weight: .medium))
                             }
                             .foregroundColor(ScandiumTheme.subtext)
@@ -595,14 +781,14 @@ struct ClientIDConfigModal: View {
                     .padding(20)
                 }
             }
-            .navigationTitle("Cấu hình SoundCloud")
+            .navigationTitle(settings.loc("Cấu hình SoundCloud", "SoundCloud Config"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Đóng") {
+                    Button(settings.loc("Đóng", "Close")) {
                         presentationMode.wrappedValue.dismiss()
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(ScandiumTheme.textPrimary)
                 }
             }
             .sheet(isPresented: $showGuideSheet) {
@@ -614,6 +800,6 @@ struct ClientIDConfigModal: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(settings.themeMode.colorScheme)
     }
 }

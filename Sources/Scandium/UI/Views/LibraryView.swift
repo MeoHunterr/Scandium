@@ -7,6 +7,7 @@ struct LibraryView: View {
     @EnvironmentObject var library: LibraryManager
     @EnvironmentObject var player: AudioPlayerEngine
     @ObservedObject private var auth = SoundCloudAuthManager.shared
+    @ObservedObject private var settings = AppSettings.shared
 
     @State private var selectedTab: Int = 0 // 0: Liked, 1: Recently Played, 2: SoundCloud
 
@@ -29,9 +30,9 @@ struct LibraryView: View {
 
     private var headerView: some View {
         HStack {
-            Text("Thư viện")
+            Text(settings.loc("Thư viện", "Library"))
                 .font(.system(size: 26, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(ScandiumTheme.textPrimary)
 
             Spacer()
 
@@ -40,7 +41,7 @@ struct LibraryView: View {
                     Image(systemName: "checkmark.seal.fill")
                         .font(.system(size: 13))
                         .foregroundColor(ScandiumTheme.spotifyGreen)
-                    Text(auth.currentUser?.username ?? "Đã kết nối")
+                    Text(auth.currentUser?.username ?? settings.loc("Đã kết nối", "Connected"))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(ScandiumTheme.subtext)
                         .lineLimit(1)
@@ -55,8 +56,8 @@ struct LibraryView: View {
 
     private var segmentedPickerView: some View {
         HStack(spacing: 8) {
-            segmentButton(title: "Đã thích (\(library.likedTracks.count))", index: 0)
-            segmentButton(title: "Gần đây (\(library.recentlyPlayed.count))", index: 1)
+            segmentButton(title: "\(settings.loc("Đã thích", "Liked")) (\(library.likedTracks.count))", index: 0)
+            segmentButton(title: "\(settings.loc("Gần đây", "Recent")) (\(library.recentlyPlayed.count))", index: 1)
             if auth.isAuthenticated {
                 segmentButton(title: "SoundCloud (\(auth.userLikedTracks.count))", index: 2)
             }
@@ -74,7 +75,7 @@ struct LibraryView: View {
         }) {
             Text(title)
                 .font(.system(size: 13, weight: selectedTab == index ? .semibold : .regular))
-                .foregroundColor(selectedTab == index ? .white : ScandiumTheme.subtext)
+                .foregroundColor(selectedTab == index ? ScandiumTheme.textPrimary : ScandiumTheme.subtext)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
                 .background(
@@ -115,8 +116,8 @@ struct LibraryView: View {
         if library.likedTracks.isEmpty {
             emptyStateView(
                 icon: "heart.slash",
-                title: "Chưa có bài hát yêu thích",
-                message: "Nhấn nút hình trái tim trên bài hát bất kỳ để lưu vào thư viện."
+                title: settings.loc("Chưa có bài hát yêu thích", "No liked songs yet"),
+                message: settings.loc("Nhấn nút hình trái tim trên bài hát bất kỳ để lưu vào thư viện.", "Tap the heart icon on any song to save it to your library.")
             )
         } else {
             // Action buttons
@@ -127,7 +128,7 @@ struct LibraryView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "play.fill")
                             .font(.system(size: 13))
-                        Text("Phát tất cả")
+                        Text(settings.loc("Phát tất cả", "Play All"))
                             .font(.system(size: 13, weight: .semibold))
                     }
                     .foregroundColor(.white)
@@ -145,10 +146,10 @@ struct LibraryView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "shuffle")
                             .font(.system(size: 13, weight: .bold))
-                        Text("Trộn bài")
+                        Text(settings.loc("Trộn bài", "Shuffle"))
                             .font(.system(size: 13, weight: .semibold))
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(ScandiumTheme.textPrimary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 38)
                     .background(ScandiumTheme.surfaceElevated)
@@ -180,16 +181,16 @@ struct LibraryView: View {
         if library.recentlyPlayed.isEmpty {
             emptyStateView(
                 icon: "clock.arrow.circlepath",
-                title: "Chưa có lịch sử nghe nhạc",
-                message: "Các bài hát bạn phát sẽ tự động xuất hiện ở đây."
+                title: settings.loc("Chưa có lịch sử nghe nhạc", "No listening history yet"),
+                message: settings.loc("Các bài hát bạn phát sẽ tự động xuất hiện ở đây.", "Tracks you play will automatically appear here.")
             )
         } else {
             HStack {
-                Text("\(library.recentlyPlayed.count) bài đã nghe gần đây")
+                Text(settings.loc("\(library.recentlyPlayed.count) bài đã nghe gần đây", "\(library.recentlyPlayed.count) recently played tracks"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(ScandiumTheme.subtext)
                 Spacer()
-                Button("Xóa lịch sử") {
+                Button(settings.loc("Xóa lịch sử", "Clear History")) {
                     library.clearRecentlyPlayed()
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -219,12 +220,12 @@ struct LibraryView: View {
         if auth.userLikedTracks.isEmpty {
             emptyStateView(
                 icon: "arrow.triangle.2.circlepath",
-                title: "Chưa đồng bộ bài hát",
-                message: "Vào mục Cá nhân để tải danh sách bài hát từ tài khoản SoundCloud của bạn."
+                title: settings.loc("Chưa đồng bộ bài hát", "No synced tracks"),
+                message: settings.loc("Vào mục Cá nhân để tải danh sách bài hát từ tài khoản SoundCloud của bạn.", "Go to Profile to load tracks from your SoundCloud account.")
             )
         } else {
             HStack {
-                Text("\(auth.userLikedTracks.count) bài đã thích trên SoundCloud")
+                Text(settings.loc("\(auth.userLikedTracks.count) bài đã thích trên SoundCloud", "\(auth.userLikedTracks.count) tracks liked on SoundCloud"))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(ScandiumTheme.subtext)
                 Spacer()
@@ -266,7 +267,7 @@ struct LibraryView: View {
 
             Text(title)
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(ScandiumTheme.textPrimary)
 
             Text(message)
                 .font(.system(size: 13, weight: .regular))
