@@ -12,6 +12,9 @@ struct FullPlayerView: View {
     @State private var waveformSamples: [Float] = []
     @State private var dragProgress: Double? = nil
     @State private var showQueueSheet: Bool = false
+    @State private var dragOffsetY: CGFloat = 0
+
+    private let playbackRates: [Float] = [0.8, 1.0, 1.25, 1.5, 2.0]
 
     init() {}
 
@@ -71,6 +74,29 @@ struct FullPlayerView: View {
             }
             .frame(width: screenWidth, height: screenHeight)
             .clipped()
+            .offset(y: max(0, dragOffsetY))
+            .gesture(
+                DragGesture(minimumDistance: 15)
+                    .onChanged { value in
+                        if value.translation.height > 0 {
+                            dragOffsetY = value.translation.height
+                        }
+                    }
+                    .onEnded { value in
+                        if value.translation.height > 120 || value.predictedEndTranslation.height > 250 {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                dragOffsetY = screenHeight
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                presentationMode.wrappedValue.dismiss()
+                            }
+                        } else {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                dragOffsetY = 0
+                            }
+                        }
+                    }
+            )
         }
         .ignoresSafeArea()
         .preferredColorScheme(.dark)
@@ -319,6 +345,20 @@ struct FullPlayerView: View {
 
             Spacer(minLength: 8)
 
+            // Speed control button
+            Button(action: {
+                cyclePlaybackRate()
+            }) {
+                Text(formatSpeed(player.playbackRate))
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(player.playbackRate == 1.0 ? Color.white.opacity(0.8) : ScandiumTheme.spotifyGreen)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(ScandiumTheme.surfaceElevated)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(PlainButtonStyle())
+
             // Queue button
             Button(action: {
                 showQueueSheet = true
@@ -329,6 +369,24 @@ struct FullPlayerView: View {
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(PlainButtonStyle())
+        }
+    }
+
+    private func cyclePlaybackRate() {
+        let current = player.playbackRate
+        if let idx = playbackRates.firstIndex(where: { abs($0 - current) < 0.05 }) {
+            let nextIdx = (idx + 1) % playbackRates.count
+            player.setPlaybackRate(playbackRates[nextIdx])
+        } else {
+            player.setPlaybackRate(1.0)
+        }
+    }
+
+    private func formatSpeed(_ rate: Float) -> String {
+        if rate == Float(Int(rate)) {
+            return String(format: "%.0fx", rate)
+        } else {
+            return String(format: "%.2gx", rate)
         }
     }
 

@@ -565,6 +565,18 @@ final class DiscoverDataStore: ObservableObject {
             }
         }
 
+        // Priority 1.5: If user has followed artists, discover songs by their followed artists
+        if auth.isAuthenticated, !auth.userFollowings.isEmpty {
+            if let randomArtist = auth.userFollowings.randomElement() {
+                let artistTracks = await safeSearch(api: api, query: randomArtist.username, limit: 12, offset: 0)
+                if !artistTracks.isEmpty {
+                    let title = isEn ? "From Artists You Follow" : "Từ nghệ sĩ bạn theo dõi"
+                    let subtitle = isEn ? "Top tracks from \(randomArtist.username)" : "Các bài hát nổi bật của \(randomArtist.username)"
+                    return (title, subtitle, artistTracks)
+                }
+            }
+        }
+
         // Priority 2: In-app liked songs
         if let seed = library.likedTracks.randomElement() {
             do {
@@ -589,13 +601,19 @@ final class DiscoverDataStore: ObservableObject {
             } catch {}
         }
 
-        // Priority 4: Dynamic client session recommendations
-        let dynamicQueries = ["Discover Weekly", "Top Electronic", "Acoustic Pop", "Chill Lo-Fi"]
-        let chosenQuery = dynamicQueries.randomElement() ?? "Discover Weekly"
-        let randomOffset = force ? Int.random(in: 0...5) : 0
-        let tracks = await safeSearch(api: api, query: chosenQuery, limit: 12, offset: randomOffset)
-        let title = isEn ? "Discover for You" : "Khám phá dành cho bạn"
-        let subtitle = isEn ? "Suggestions based on your session" : "Gợi ý dựa trên phiên nghe hiện tại"
+        // Priority 4: Dynamic client session recommendations with rich variety
+        let dynamicQueries = [
+            ("V-Pop Hot Hits", "Tuyển tập nhạc Việt thịnh hành"),
+            ("Acoustic Chill", "Giai điệu mộc mạc thư giãn"),
+            ("Deep Electronic & EDM", "Sôi động với năng lượng cao"),
+            ("Lo-Fi Study Beats", "Tập trung và làm việc hiệu quả"),
+            ("Indie Vibes", "Những thanh âm indie độc đáo")
+        ]
+        let chosen = dynamicQueries.randomElement() ?? ("Discover Weekly", "Khám phá hàng tuần")
+        let randomOffset = force ? Int.random(in: 0...4) : 0
+        let tracks = await safeSearch(api: api, query: chosen.0, limit: 12, offset: randomOffset)
+        let title = isEn ? chosen.0 : chosen.0
+        let subtitle = isEn ? "Curated discovery for your taste" : chosen.1
         return (title, subtitle, tracks)
     }
 

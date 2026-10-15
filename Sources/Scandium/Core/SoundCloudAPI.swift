@@ -161,6 +161,45 @@ final class SoundCloudAPI: ObservableObject {
         return []
     }
 
+    /// Fetches a specific playlist and its tracks
+    func getPlaylist(id: Int, oauthToken: String? = nil) async throws -> SoundCloudPlaylist {
+        let clientID = try await scraper.getClientID()
+        let urlString = "\(Self.baseURL)/playlists/\(id)?client_id=\(clientID)"
+        var headers: [String: String]? = nil
+        if let token = oauthToken, !token.isEmpty {
+            headers = ["Authorization": "OAuth \(token)"]
+        }
+        return try await performRequest(
+            urlString: urlString,
+            decodeAs: SoundCloudPlaylist.self,
+            headers: headers,
+            retryCount: 0
+        )
+    }
+
+    /// Fetches artists/users followed by the user
+    func getUserFollowings(userID: Int, oauthToken: String? = nil, limit: Int = 30) async throws -> [SoundCloudUser] {
+        let clientID = try await scraper.getClientID()
+        let urlString = "\(Self.baseURL)/users/\(userID)/followings?client_id=\(clientID)&limit=\(limit)"
+        var headers: [String: String]? = nil
+        if let token = oauthToken, !token.isEmpty {
+            headers = ["Authorization": "OAuth \(token)"]
+        }
+
+        struct FollowingsResponse: Codable {
+            let collection: [SoundCloudUser]
+        }
+
+        let data = try await performRawRequest(urlString: urlString, headers: headers)
+        if let resp = try? JSONDecoder().decode(FollowingsResponse.self, from: data) {
+            return resp.collection
+        }
+        if let arr = try? JSONDecoder().decode([SoundCloudUser].self, from: data) {
+            return arr
+        }
+        return []
+    }
+
     /// Fetches related / recommended tracks for a given track ID
     func getRelatedTracks(trackID: Int, limit: Int = 15) async throws -> [Track] {
         let clientID = try await scraper.getClientID()

@@ -42,9 +42,8 @@ struct ScandiumApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
-                // Phase 0: True OLED black baseline (always visible immediately,
-                // ensures UIWindowScene is fully initialized before any SwiftUI view)
-                Color.black
+                // Phase 0: Dynamic background baseline matching theme
+                ScandiumTheme.bgPrimary
                     .ignoresSafeArea()
 
                 if showSafeMode {

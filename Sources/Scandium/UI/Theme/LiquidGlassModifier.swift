@@ -97,6 +97,7 @@ struct SpecularBorderGradient: View {
 
 struct AmbientCanvasBackground: View {
     let artworkURL: URL?
+    @ObservedObject private var settings = AppSettings.shared
     @State private var loadedImage: UIImage?
 
     init(artworkURL: URL? = nil) {
@@ -339,6 +340,7 @@ struct ShimmerView: View {
 // MARK: - Threads Flat Row Item (Meta Threads Style)
 
 struct ThreadsRow<TrailingContent: View>: View {
+    @ObservedObject private var settings = AppSettings.shared
     let icon: String
     let iconColor: Color
     let title: String

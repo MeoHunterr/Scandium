@@ -33,6 +33,7 @@ final class AudioPlayerEngine: ObservableObject {
     @Published private(set) var duration: TimeInterval = 0
     @Published private(set) var bufferedTime: TimeInterval = 0
     @Published private(set) var playbackVolume: Float = 1.0
+    @Published var playbackRate: Float = 1.0
 
     // MARK: - Queue & Playback Modes
 
@@ -183,6 +184,9 @@ final class AudioPlayerEngine: ObservableObject {
         // 4. Replace current item in the persistent player and play
         player.replaceCurrentItem(with: newItem)
         player.play()
+        if playbackRate != 1.0 {
+            player.rate = playbackRate
+        }
         playbackState = .playing
 
         updateNowPlayingInfo(track: track)
@@ -236,6 +240,9 @@ final class AudioPlayerEngine: ObservableObject {
 
     func resume() {
         player.play()
+        if playbackRate != 1.0 {
+            player.rate = playbackRate
+        }
         playbackState = .playing
         updateNowPlayingElapsedTime()
     }
@@ -243,6 +250,14 @@ final class AudioPlayerEngine: ObservableObject {
     func pause() {
         player.pause()
         playbackState = .paused
+        updateNowPlayingElapsedTime()
+    }
+
+    func setPlaybackRate(_ rate: Float) {
+        playbackRate = rate
+        if playbackState == .playing {
+            player.rate = rate
+        }
         updateNowPlayingElapsedTime()
     }
 
@@ -387,10 +402,27 @@ final class AudioPlayerEngine: ObservableObject {
             nextTrack()
         } else if AppSettings.shared.autoPlayRelated, let current = currentTrack {
             Task {
-                if let related = try? await api.getRelatedTracks(trackID: current.id, limit: 5),
-                   let next = related.first(where: { $0.id != current.id }) {
+                var newTracks: [Track] = []
+                // Attempt 1: Fetch related tracks
+                if let related = try? await api.getRelatedTracks(trackID: current.id, limit: 10) {
+                    let existingIDs = Set(self.queue.map { $0.id })
+                    let filtered = related.filter { !existingIDs.contains($0.id) }
+                    newTracks = filtered
+                }
+                // Attempt 2: If related tracks empty, fallback search by genre or artist
+                if newTracks.isEmpty {
+                    let query = current.genre ?? current.user?.username ?? "Chill Hits"
+                    if let searchRes = try? await api.searchTracks(query: query, limit: 10, offset: 0) {
+                        let existingIDs = Set(self.queue.map { $0.id })
+                        newTracks = searchRes.collection.filter { !existingIDs.contains($0.id) }
+                    }
+                }
+
+                if !newTracks.isEmpty {
                     await MainActor.run {
-                        self.enqueue(next)
+                        for t in newTracks {
+                            self.enqueue(t)
+                        }
                         self.nextTrack()
                     }
                 } else {

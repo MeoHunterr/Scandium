@@ -13,6 +13,8 @@ final class SoundCloudAuthManager: ObservableObject {
     @Published private(set) var currentUser: SoundCloudUser?
     @Published private(set) var oauthToken: String?
     @Published private(set) var userPlaylists: [SoundCloudPlaylist] = []
+    @Published private(set) var userAlbums: [SoundCloudPlaylist] = []
+    @Published private(set) var userFollowings: [SoundCloudUser] = []
     @Published private(set) var userLikedTracks: [Track] = []
     @Published private(set) var isLoading: Bool = false
     @Published var errorMessage: String?
@@ -22,6 +24,7 @@ final class SoundCloudAuthManager: ObservableObject {
     private let tokenKey = "scandium_soundcloud_oauth_token"
     private let userKey = "scandium_soundcloud_current_user"
     private let playlistsKey = "scandium_soundcloud_user_playlists"
+    private let followingsKey = "scandium_soundcloud_user_followings"
     private let userLikesKey = "scandium_soundcloud_user_likes"
 
     private var api: SoundCloudAPI?
@@ -51,6 +54,12 @@ final class SoundCloudAuthManager: ObservableObject {
         if let plData = UserDefaults.standard.data(forKey: playlistsKey),
            let playlists = try? JSONDecoder().decode([SoundCloudPlaylist].self, from: plData) {
             self.userPlaylists = playlists
+            self.userAlbums = playlists.filter { ($0.trackCount ?? 0) >= 5 || ($0.title.lowercased().contains("album") || $0.title.lowercased().contains("ep")) }
+        }
+
+        if let folData = UserDefaults.standard.data(forKey: followingsKey),
+           let followings = try? JSONDecoder().decode([SoundCloudUser].self, from: folData) {
+            self.userFollowings = followings
         }
 
         if let likesData = UserDefaults.standard.data(forKey: userLikesKey),
@@ -74,6 +83,10 @@ final class SoundCloudAuthManager: ObservableObject {
 
         if let plData = try? JSONEncoder().encode(userPlaylists) {
             UserDefaults.standard.set(plData, forKey: playlistsKey)
+        }
+
+        if let folData = try? JSONEncoder().encode(userFollowings) {
+            UserDefaults.standard.set(folData, forKey: followingsKey)
         }
 
         if let likesData = try? JSONEncoder().encode(userLikedTracks) {
@@ -153,12 +166,15 @@ final class SoundCloudAuthManager: ObservableObject {
         do {
             async let fetchedLikes = api.getUserLikes(userID: user.id, oauthToken: oauthToken, limit: 50)
             async let fetchedPlaylists = api.getUserPlaylists(userID: user.id, oauthToken: oauthToken)
+            async let fetchedFollowings = api.getUserFollowings(userID: user.id, oauthToken: oauthToken, limit: 30)
 
-            let (likes, playlists) = try await (fetchedLikes, fetchedPlaylists)
+            let (likes, playlists, followings) = try await (fetchedLikes, fetchedPlaylists, fetchedFollowings)
             let uniqueLikes = deduplicateTracks(likes)
 
             self.userLikedTracks = uniqueLikes
             self.userPlaylists = playlists
+            self.userAlbums = playlists.filter { ($0.trackCount ?? 0) >= 5 || ($0.title.lowercased().contains("album") || $0.title.lowercased().contains("ep")) }
+            self.userFollowings = followings
 
             // Also merge into local LibraryManager so they appear across the app
             for track in uniqueLikes {
@@ -196,12 +212,15 @@ final class SoundCloudAuthManager: ObservableObject {
         self.currentUser = nil
         self.oauthToken = nil
         self.userPlaylists = []
+        self.userAlbums = []
+        self.userFollowings = []
         self.userLikedTracks = []
         self.errorMessage = nil
 
         UserDefaults.standard.removeObject(forKey: tokenKey)
         UserDefaults.standard.removeObject(forKey: userKey)
         UserDefaults.standard.removeObject(forKey: playlistsKey)
+        UserDefaults.standard.removeObject(forKey: followingsKey)
         UserDefaults.standard.removeObject(forKey: userLikesKey)
     }
 }
