@@ -68,6 +68,9 @@ echo ""
 # Copy icon assets
 if [ -d "${PROJECT_ROOT}/assets" ]; then
     cp -f "${PROJECT_ROOT}/assets/"*.png "${APP_BUNDLE}/" 2>/dev/null || true
+    if [ "${APP_BUNDLE}" != "${PROJECT_ROOT}/xtool/${APP_NAME}.app" ] && [ -d "${PROJECT_ROOT}/xtool/${APP_NAME}.app" ]; then
+        cp -f "${PROJECT_ROOT}/assets/"*.png "${PROJECT_ROOT}/xtool/${APP_NAME}.app/" 2>/dev/null || true
+    fi
     echo "       Copied Scandium AppIcon assets into ${APP_BUNDLE}"
 fi
 echo ""

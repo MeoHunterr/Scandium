@@ -196,7 +196,11 @@ struct SettingsSheetView: View {
                             let isSelected = settings.currentAppIcon == option
                             Button(action: {
                                 withAnimation(.easeInOut(duration: 0.2)) {
-                                    settings.setAppIcon(option)
+                                    settings.setAppIcon(option) { success, message in
+                                        if let message = message {
+                                            showToast(message)
+                                        }
+                                    }
                                 }
                             }) {
                                 VStack(spacing: 8) {
@@ -241,8 +245,10 @@ struct SettingsSheetView: View {
     private func iconThumbnail(for option: AppIconOption) -> some View {
         Group {
             if let path = Bundle.main.path(forResource: option.previewImageName + "@2x", ofType: "png") ??
+                          Bundle.main.path(forResource: option.previewImageName + "60x60@2x", ofType: "png") ??
                           Bundle.main.path(forResource: option.previewImageName, ofType: "png") ??
-                          Bundle.main.path(forResource: option.rawValue, ofType: "png"),
+                          Bundle.main.path(forResource: option.rawValue, ofType: "png") ??
+                          (option == .default ? Bundle.main.path(forResource: "icon", ofType: "png") : nil),
                let uiImage = UIImage(contentsOfFile: path) {
                 Image(uiImage: uiImage)
                     .resizable()

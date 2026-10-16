@@ -168,6 +168,12 @@ for var_name, var_info in variants.items():
     if var_name == "default":
         icon_1024.save("assets/AppIcon.png", "PNG", optimize=True)
         icon_1024.resize((180, 180), Image.Resampling.LANCZOS).save("assets/icon.png", "PNG", optimize=True)
+        icon_1024.resize((120, 120), Image.Resampling.LANCZOS).save("assets/AppIcon@2x.png", "PNG", optimize=True)
+        icon_1024.resize((180, 180), Image.Resampling.LANCZOS).save("assets/AppIcon@3x.png", "PNG", optimize=True)
+        icon_1024.resize((76, 76), Image.Resampling.LANCZOS).save("assets/AppIcon~ipad.png", "PNG", optimize=True)
+        icon_1024.resize((152, 152), Image.Resampling.LANCZOS).save("assets/AppIcon~ipad@2x.png", "PNG", optimize=True)
+        icon_1024.resize((152, 152), Image.Resampling.LANCZOS).save("assets/AppIcon@2x~ipad.png", "PNG", optimize=True)
+        icon_1024.resize((76, 76), Image.Resampling.LANCZOS).save("assets/AppIcon76x76.png", "PNG", optimize=True)
         for name, sz in sizes.items():
             resized = icon_1024.resize((sz, sz), Image.Resampling.LANCZOS)
             resized.save(f"assets/AppIcon{name}.png", "PNG", optimize=True)
@@ -177,6 +183,12 @@ for var_name, var_info in variants.items():
         # Direct @2x and @3x files (standard iOS resolution convention for CFBundleAlternateIcons)
         icon_1024.resize((120, 120), Image.Resampling.LANCZOS).save(f"assets/{prefix}@2x.png", "PNG", optimize=True)
         icon_1024.resize((180, 180), Image.Resampling.LANCZOS).save(f"assets/{prefix}@3x.png", "PNG", optimize=True)
+        # iPad specific alternate icon convention
+        icon_1024.resize((76, 76), Image.Resampling.LANCZOS).save(f"assets/{prefix}~ipad.png", "PNG", optimize=True)
+        icon_1024.resize((152, 152), Image.Resampling.LANCZOS).save(f"assets/{prefix}~ipad@2x.png", "PNG", optimize=True)
+        icon_1024.resize((152, 152), Image.Resampling.LANCZOS).save(f"assets/{prefix}@2x~ipad.png", "PNG", optimize=True)
+        icon_1024.resize((167, 167), Image.Resampling.LANCZOS).save(f"assets/{prefix}83.5x83.5@2x~ipad.png", "PNG", optimize=True)
+        icon_1024.resize((76, 76), Image.Resampling.LANCZOS).save(f"assets/{prefix}76x76.png", "PNG", optimize=True)
         # Sized variants
         for name, sz in sizes.items():
             resized = icon_1024.resize((sz, sz), Image.Resampling.LANCZOS)

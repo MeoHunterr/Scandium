@@ -66,7 +66,7 @@ struct DiscoverView: View {
 
                 // Horizontal Carousel: Thịnh hành (Trending)
                 carouselSection(
-                    title: settings.loc("Thịnh hành (VN)", "Trending (VN)"),
+                    title: settings.loc("Thịnh hành", "Global Trending"),
                     tracks: store.trendingTracks
                 )
 
@@ -505,8 +505,8 @@ final class DiscoverDataStore: ObservableObject {
         let remixOffset = force ? Int.random(in: 0...5) : 0
 
         async let trTask = safeSearch(api: api, query: trendingQuery, limit: 10, offset: trendingOffset)
-        async let chTask = safeSearch(api: api, query: "Chill R&B", limit: 10, offset: chillOffset)
-        async let rmTask = safeSearch(api: api, query: "Remix Lo-Fi", limit: 10, offset: remixOffset)
+        async let chTask = safeSearch(api: api, query: isEn ? "Chill Vibes & R&B" : "Chill R&B", limit: 10, offset: chillOffset)
+        async let rmTask = safeSearch(api: api, query: isEn ? "EDM Festival Hits" : "Remix Lo-Fi", limit: 10, offset: remixOffset)
 
         let (persResult, qpTracks, trTracks, chTracks, rmTracks) = await (persTask, qpTask, trTask, chTask, rmTask)
 

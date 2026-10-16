@@ -40,7 +40,6 @@
                 <key>CFBundleIconFiles</key>
                 <array>
                     <string>AppIcon-Orange</string>
-                    <string>AppIcon-Orange60x60</string>
                 </array>
                 <key>UIPrerenderedIcon</key>
                 <false/>
@@ -50,7 +49,6 @@
                 <key>CFBundleIconFiles</key>
                 <array>
                     <string>AppIcon-Cyan</string>
-                    <string>AppIcon-Cyan60x60</string>
                 </array>
                 <key>UIPrerenderedIcon</key>
                 <false/>
@@ -60,7 +58,6 @@
                 <key>CFBundleIconFiles</key>
                 <array>
                     <string>AppIcon-Purple</string>
-                    <string>AppIcon-Purple60x60</string>
                 </array>
                 <key>UIPrerenderedIcon</key>
                 <false/>
@@ -70,7 +67,6 @@
                 <key>CFBundleIconFiles</key>
                 <array>
                     <string>AppIcon-Monochrome</string>
-                    <string>AppIcon-Monochrome60x60</string>
                 </array>
                 <key>UIPrerenderedIcon</key>
                 <false/>
@@ -96,8 +92,6 @@
                 <key>CFBundleIconFiles</key>
                 <array>
                     <string>AppIcon-Orange</string>
-                    <string>AppIcon-Orange60x60</string>
-                    <string>AppIcon-Orange76x76</string>
                 </array>
                 <key>UIPrerenderedIcon</key>
                 <false/>
@@ -107,8 +101,6 @@
                 <key>CFBundleIconFiles</key>
                 <array>
                     <string>AppIcon-Cyan</string>
-                    <string>AppIcon-Cyan60x60</string>
-                    <string>AppIcon-Cyan76x76</string>
                 </array>
                 <key>UIPrerenderedIcon</key>
                 <false/>
@@ -118,8 +110,6 @@
                 <key>CFBundleIconFiles</key>
                 <array>
                     <string>AppIcon-Purple</string>
-                    <string>AppIcon-Purple60x60</string>
-                    <string>AppIcon-Purple76x76</string>
                 </array>
                 <key>UIPrerenderedIcon</key>
                 <false/>
@@ -129,8 +119,6 @@
                 <key>CFBundleIconFiles</key>
                 <array>
                     <string>AppIcon-Monochrome</string>
-                    <string>AppIcon-Monochrome60x60</string>
-                    <string>AppIcon-Monochrome76x76</string>
                 </array>
                 <key>UIPrerenderedIcon</key>
                 <false/>

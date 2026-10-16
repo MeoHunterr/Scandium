@@ -20,9 +20,228 @@ struct SearchView: View {
 
     @ObservedObject private var settings = AppSettings.shared
 
-    private var quickTags: [String] {
-        [settings.loc("Tất cả", "All"), "V-Pop", "Chill & Lo-Fi", "EDM Remix", "R&B", "Acoustic", "Podcast"]
+    struct SearchCategory: Identifiable {
+        let id: String
+        let title: String
+        let query: String
+        let icon: String
+        let colors: [Color]
     }
+
+    private var quickTags: [String] {
+        if settings.language == .english {
+            return [
+                settings.loc("Tất cả", "All"),
+                "Top Hits",
+                "Pop",
+                "Hip-Hop",
+                "EDM & Dance",
+                "Chill & Lo-Fi",
+                "R&B",
+                "Rock",
+                "Acoustic",
+                "Podcasts"
+            ]
+        } else {
+            return [
+                settings.loc("Tất cả", "All"),
+                "Thịnh hành",
+                "V-Pop",
+                "Rap Việt",
+                "Chill & Lo-Fi",
+                "EDM Remix",
+                "R&B",
+                "Acoustic",
+                "Nhạc Trẻ",
+                "Podcast"
+            ]
+        }
+    }
+
+    private var trendingKeywords: [String] {
+        if settings.language == .english {
+            return [
+                "Global Top 50",
+                "Viral Hits",
+                "The Weeknd",
+                "Taylor Swift",
+                "Synthwave",
+                "Lo-Fi Beats",
+                "Dua Lipa",
+                "Billie Eilish",
+                "Drake",
+                "EDM Festival",
+                "Workout Energy",
+                "Acoustic Sunset"
+            ]
+        } else {
+            return [
+                "V-Pop Hot Hits",
+                "Sơn Tùng M-TP",
+                "Rap Việt",
+                "Nhạc Trẻ Remix",
+                "Chill Buổi Tối",
+                "Vũ",
+                "Đen Vâu",
+                "Acoustic Buồn",
+                "Lo-Fi Việt Nam",
+                "Top TikTok Vietnam",
+                "Cà Phê Sáng",
+                "Indie Việt"
+            ]
+        }
+    }
+
+    private var browseCategories: [SearchCategory] {
+        if settings.language == .english {
+            return [
+                SearchCategory(
+                    id: "pop",
+                    title: "Pop & Top Hits",
+                    query: "Today Top Hits Pop",
+                    icon: "music.mic",
+                    colors: [Color(red: 0.90, green: 0.20, blue: 0.55), Color(red: 0.60, green: 0.10, blue: 0.75)]
+                ),
+                SearchCategory(
+                    id: "hiphop",
+                    title: "Hip-Hop & Rap",
+                    query: "Hip Hop Rap Hits",
+                    icon: "flame.fill",
+                    colors: [Color(red: 0.95, green: 0.40, blue: 0.10), Color(red: 0.85, green: 0.15, blue: 0.20)]
+                ),
+                SearchCategory(
+                    id: "electronic",
+                    title: "Dance & EDM",
+                    query: "EDM Festival Dance",
+                    icon: "bolt.horizontal.fill",
+                    colors: [Color(red: 0.05, green: 0.70, blue: 0.90), Color(red: 0.15, green: 0.30, blue: 0.85)]
+                ),
+                SearchCategory(
+                    id: "chill",
+                    title: "Chill & Lo-Fi",
+                    query: "Lo-Fi Beats Study Chill",
+                    icon: "cup.and.saucer.fill",
+                    colors: [Color(red: 0.10, green: 0.65, blue: 0.55), Color(red: 0.20, green: 0.80, blue: 0.45)]
+                ),
+                SearchCategory(
+                    id: "rock",
+                    title: "Rock & Alternative",
+                    query: "Rock Alternative Classic",
+                    icon: "guitars.fill",
+                    colors: [Color(red: 0.75, green: 0.15, blue: 0.20), Color(red: 0.30, green: 0.10, blue: 0.20)]
+                ),
+                SearchCategory(
+                    id: "rnb",
+                    title: "R&B & Soul",
+                    query: "R&B Soul Chill",
+                    icon: "heart.fill",
+                    colors: [Color(red: 0.50, green: 0.15, blue: 0.80), Color(red: 0.70, green: 0.20, blue: 0.65)]
+                ),
+                SearchCategory(
+                    id: "workout",
+                    title: "Workout & Energy",
+                    query: "Workout Gym Motivation Energy",
+                    icon: "figure.run",
+                    colors: [Color(red: 0.95, green: 0.50, blue: 0.10), Color(red: 0.90, green: 0.25, blue: 0.10)]
+                ),
+                SearchCategory(
+                    id: "focus",
+                    title: "Focus & Ambient",
+                    query: "Deep Focus Ambient Piano",
+                    icon: "brain.head.profile",
+                    colors: [Color(red: 0.25, green: 0.40, blue: 0.80), Color(red: 0.20, green: 0.20, blue: 0.45)]
+                ),
+                SearchCategory(
+                    id: "indie",
+                    title: "Indie Discoveries",
+                    query: "Indie Pop Folk Discover",
+                    icon: "sparkles",
+                    colors: [Color(red: 0.65, green: 0.20, blue: 0.70), Color(red: 0.85, green: 0.20, blue: 0.50)]
+                ),
+                SearchCategory(
+                    id: "acoustic",
+                    title: "Acoustic & Melodic",
+                    query: "Acoustic Guitar Melodic",
+                    icon: "waveform",
+                    colors: [Color(red: 0.20, green: 0.60, blue: 0.35), Color(red: 0.10, green: 0.40, blue: 0.25)]
+                )
+            ]
+        } else {
+            return [
+                SearchCategory(
+                    id: "vpop",
+                    title: "V-Pop Nổi Bật",
+                    query: "V-Pop Hot Hits",
+                    icon: "music.mic",
+                    colors: [Color(red: 0.90, green: 0.20, blue: 0.55), Color(red: 0.60, green: 0.10, blue: 0.75)]
+                ),
+                SearchCategory(
+                    id: "rapviet",
+                    title: "Rap Việt Nam",
+                    query: "Rap Việt",
+                    icon: "flame.fill",
+                    colors: [Color(red: 0.95, green: 0.40, blue: 0.10), Color(red: 0.85, green: 0.15, blue: 0.20)]
+                ),
+                SearchCategory(
+                    id: "vinahouse",
+                    title: "EDM & Remix",
+                    query: "Nhạc Trẻ Remix EDM",
+                    icon: "bolt.horizontal.fill",
+                    colors: [Color(red: 0.05, green: 0.70, blue: 0.90), Color(red: 0.15, green: 0.30, blue: 0.85)]
+                ),
+                SearchCategory(
+                    id: "chillvn",
+                    title: "Chill & Lo-Fi",
+                    query: "Lo-Fi Việt Nam Chill",
+                    icon: "cup.and.saucer.fill",
+                    colors: [Color(red: 0.10, green: 0.65, blue: 0.55), Color(red: 0.20, green: 0.80, blue: 0.45)]
+                ),
+                SearchCategory(
+                    id: "ballad",
+                    title: "Ballad Tình Cảm",
+                    query: "Nhạc Trẻ Ballad Buồn",
+                    icon: "heart.fill",
+                    colors: [Color(red: 0.50, green: 0.15, blue: 0.80), Color(red: 0.70, green: 0.20, blue: 0.65)]
+                ),
+                SearchCategory(
+                    id: "acousticvn",
+                    title: "Acoustic Mộc Mạc",
+                    query: "Acoustic Guitar Việt",
+                    icon: "waveform",
+                    colors: [Color(red: 0.20, green: 0.60, blue: 0.35), Color(red: 0.10, green: 0.40, blue: 0.25)]
+                ),
+                SearchCategory(
+                    id: "indievn",
+                    title: "Indie Việt",
+                    query: "Indie Việt Nam",
+                    icon: "sparkles",
+                    colors: [Color(red: 0.65, green: 0.20, blue: 0.70), Color(red: 0.85, green: 0.20, blue: 0.50)]
+                ),
+                SearchCategory(
+                    id: "taptrung",
+                    title: "Tập Trung & Thư Giãn",
+                    query: "Nhạc Tập Trung Làm Việc Học Bài",
+                    icon: "brain.head.profile",
+                    colors: [Color(red: 0.25, green: 0.40, blue: 0.80), Color(red: 0.20, green: 0.20, blue: 0.45)]
+                ),
+                SearchCategory(
+                    id: "caphe",
+                    title: "Quán Cà Phê",
+                    query: "Cà Phê Sáng Chill Acoustic",
+                    icon: "cup.and.saucer",
+                    colors: [Color(red: 0.80, green: 0.45, blue: 0.25), Color(red: 0.55, green: 0.25, blue: 0.15)]
+                ),
+                SearchCategory(
+                    id: "gymvn",
+                    title: "Gym & Năng Lượng",
+                    query: "Workout Bass Boosted Remix",
+                    icon: "figure.run",
+                    colors: [Color(red: 0.95, green: 0.50, blue: 0.10), Color(red: 0.90, green: 0.25, blue: 0.10)]
+                )
+            ]
+        }
+    }
+
     private static let searchHistoryKey = "scandium_search_history_v1"
     private static let maxSearchHistory = 12
 
@@ -118,8 +337,12 @@ struct SearchView: View {
                     Button(action: {
                         selectedFilter = tag
                         if tag != defaultTag {
-                            searchText = tag
-                            performSearch()
+                            triggerSearchKeyword(tag)
+                        } else {
+                            searchText = ""
+                            tracks = []
+                            hasSearched = false
+                            errorMessage = nil
                         }
                     }) {
                         Text(tag)
@@ -193,95 +416,199 @@ struct SearchView: View {
         }
     }
 
-    // MARK: - Empty State (Search History & Prompt)
+    // MARK: - Empty State (Search Recommendations, Browse Categories & History)
 
     private var emptyStateView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 22) {
             if !searchHistory.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(settings.loc("Tìm kiếm gần đây", "Recent Searches"))
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(ScandiumTheme.textPrimary)
-                        Spacer()
-                        Button(action: clearSearchHistory) {
-                            Text(settings.loc("Xóa tất cả", "Clear All"))
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(ScandiumTheme.subtext)
+                recentSearchesSection
+            }
+
+            trendingSearchesSection
+
+            browseCategoriesSection
+        }
+        .padding(.top, 4)
+    }
+
+    private var recentSearchesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(settings.loc("Tìm kiếm gần đây", "Recent Searches"))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(ScandiumTheme.textPrimary)
+                Spacer()
+                Button(action: clearSearchHistory) {
+                    Text(settings.loc("Xóa tất cả", "Clear All"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(ScandiumTheme.subtext)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
+
+            VStack(spacing: 0) {
+                ForEach(searchHistory, id: \.self) { item in
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            triggerSearchKeyword(item)
+                        }) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(ScandiumTheme.subtext)
+
+                                Text(item)
+                                    .font(.system(size: 15, weight: .regular))
+                                    .foregroundColor(ScandiumTheme.textPrimary)
+                                    .lineLimit(1)
+
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        Button(action: {
+                            removeSearchHistoryItem(item)
+                        }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(ScandiumTheme.subtext.opacity(0.8))
+                                .frame(width: 32, height: 32)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
                     .padding(.horizontal, 16)
-                    .padding(.top, 8)
+                    .padding(.vertical, 10)
 
-                    VStack(spacing: 0) {
-                        ForEach(searchHistory, id: \.self) { item in
-                            HStack(spacing: 12) {
-                                Button(action: {
-                                    searchText = item
-                                    performSearch()
-                                }) {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: "clock.arrow.circlepath")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(ScandiumTheme.subtext)
+                    HairlineDivider(leadingPadding: 42)
+                }
+            }
+            .background(ScandiumTheme.surfaceDark)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(.horizontal, 16)
+        }
+    }
 
-                                        Text(item)
-                                            .font(.system(size: 15, weight: .regular))
-                                            .foregroundColor(ScandiumTheme.textPrimary)
-                                            .lineLimit(1)
+    private var trendingSearchesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(Color.orange)
 
-                                        Spacer()
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(PlainButtonStyle())
+                Text(settings.loc("Đề xuất thịnh hành", "Trending Searches"))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(ScandiumTheme.textPrimary)
 
-                                Button(action: {
-                                    removeSearchHistoryItem(item)
-                                }) {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(ScandiumTheme.subtext.opacity(0.8))
-                                        .frame(width: 32, height: 32)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(PlainButtonStyle())
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 8) {
+                    ForEach(trendingKeywords, id: \.self) { keyword in
+                        Button(action: {
+                            triggerSearchKeyword(keyword)
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(ScandiumTheme.subtext)
+
+                                Text(keyword)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(ScandiumTheme.textPrimary)
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-
-                            HairlineDivider(leadingPadding: 42)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(ScandiumTheme.surfaceElevated)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            )
                         }
+                        .buttonStyle(PlainButtonStyle())
                     }
-                    .background(ScandiumTheme.surfaceDark)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.horizontal, 16)
                 }
-            } else {
-                VStack(spacing: 14) {
-                    Spacer().frame(height: 40)
-
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 42, weight: .light))
-                        .foregroundColor(ScandiumTheme.subtext.opacity(0.4))
-
-                    Text(settings.loc("Tìm bài hát yêu thích", "Find your favorite music"))
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(ScandiumTheme.textPrimary)
-
-                    Text(settings.loc("Nhập từ khóa hoặc chọn một thể loại ở trên để bắt đầu nghe nhạc.", "Type keywords or select a genre above to start listening."))
-                        .font(.system(size: 13))
-                        .foregroundColor(ScandiumTheme.subtext)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 36)
-
-                    Spacer().frame(height: 40)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
+                .padding(.horizontal, 16)
             }
         }
+    }
+
+    private var browseCategoriesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "square.grid.2x2.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(settings.accentColor.color)
+
+                Text(settings.loc("Khám phá thể loại", "Browse Categories"))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(ScandiumTheme.textPrimary)
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 12),
+                    GridItem(.flexible(), spacing: 12)
+                ],
+                spacing: 12
+            ) {
+                ForEach(browseCategories) { cat in
+                    Button(action: {
+                        triggerSearchKeyword(cat.query)
+                    }) {
+                        ZStack(alignment: .bottomTrailing) {
+                            LinearGradient(
+                                colors: cat.colors,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+
+                            Image(systemName: cat.icon)
+                                .font(.system(size: 42, weight: .bold))
+                                .foregroundColor(Color.white.opacity(0.22))
+                                .rotationEffect(.degrees(12))
+                                .offset(x: 10, y: 10)
+
+                            VStack(alignment: .leading) {
+                                Text(cat.title)
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .shadow(color: Color.black.opacity(0.35), radius: 2, x: 0, y: 1)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(12)
+                        }
+                        .frame(height: 78)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    private func triggerSearchKeyword(_ keyword: String) {
+        searchText = keyword
+        selectedFilter = ""
+        performSearch()
     }
 
     // MARK: - No Results

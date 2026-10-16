@@ -302,22 +302,39 @@ public final class AppSettings: ObservableObject {
 
     // MARK: - App Icon Switcher
 
-    public func setAppIcon(_ option: AppIconOption) {
+    public func setAppIcon(_ option: AppIconOption, completion: ((Bool, String?) -> Void)? = nil) {
         currentAppIcon = option
         triggerHaptic()
 
         DispatchQueue.main.async {
             guard UIApplication.shared.supportsAlternateIcons else {
+                let msg = self.loc(
+                    "Thiết bị hoặc môi trường hiện tại không hỗ trợ đổi biểu tượng trực tiếp.",
+                    "Alternate icons are not supported in this device environment."
+                )
+                print("[AppSettings] \(msg)")
+                completion?(false, msg)
                 return
             }
 
-            if UIApplication.shared.alternateIconName == option.iconName {
+            let targetName = option.iconName
+            if UIApplication.shared.alternateIconName == targetName {
+                let msg = self.loc("Biểu tượng này đang được kích hoạt.", "This icon is already active.")
+                completion?(true, msg)
                 return
             }
 
-            UIApplication.shared.setAlternateIconName(option.iconName) { error in
-                if let error = error {
-                    print("[AppSettings] Error setting icon: \(error.localizedDescription)")
+            UIApplication.shared.setAlternateIconName(targetName) { error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        let errMsg = "\(self.loc("Lỗi đổi biểu tượng", "Error setting icon")): \(error.localizedDescription)"
+                        print("[AppSettings] \(errMsg)")
+                        completion?(false, errMsg)
+                    } else {
+                        let okMsg = self.loc("Đã đổi biểu tượng ứng dụng thành công!", "App icon changed successfully!")
+                        print("[AppSettings] \(okMsg)")
+                        completion?(true, okMsg)
+                    }
                 }
             }
         }
