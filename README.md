@@ -13,11 +13,9 @@ Install via TrollStore or sideloading, open it, and stream directly without ads 
 
 ## Screenshots
 
-| ![Home](assets/screenshots/home.png) | ![Player](assets/screenshots/player.png) |
-| :---: | :---: |
-| Home & Quick Picks | Full Player & Waveform |
-| ![Library](assets/screenshots/library.png) | ![Settings](assets/screenshots/settings.png) |
-| Library & Playlists | Account & Cache Management |
+| <img src="assets/screenshots/home.png" width="220" alt="Home"> | <img src="assets/screenshots/player.png" width="220" alt="Player"> | <img src="assets/screenshots/library.png" width="220" alt="Library"> | <img src="assets/screenshots/settings.png" width="220" alt="Settings"> |
+| :---: | :---: | :---: | :---: |
+| Home & Discovery | Now Playing | Library | Settings |
 
 ## Installation
 
