@@ -327,9 +327,19 @@ public final class AppSettings: ObservableObject {
             UIApplication.shared.setAlternateIconName(targetName) { error in
                 DispatchQueue.main.async {
                     if let error = error {
-                        let errMsg = "\(self.loc("Lỗi đổi biểu tượng", "Error setting icon")): \(error.localizedDescription)"
-                        print("[AppSettings] \(errMsg)")
-                        completion?(false, errMsg)
+                        let nsError = error as NSError
+                        if nsError.domain == NSOSStatusErrorDomain && nsError.code == -54 {
+                            let tipMsg = self.loc(
+                                "Đã lưu cài đặt biểu tượng! (Nếu chưa đổi trên màn hình chính, hãy Rebuild Icon Cache trong TrollStore)",
+                                "App icon saved! (If not updated on home screen, use Rebuild Icon Cache in TrollStore)"
+                            )
+                            print("[AppSettings] OSStatus -54 handled: \(tipMsg)")
+                            completion?(true, tipMsg)
+                        } else {
+                            let errMsg = "\(self.loc("Lỗi đổi biểu tượng", "Error setting icon")): \(error.localizedDescription)"
+                            print("[AppSettings] \(errMsg)")
+                            completion?(false, errMsg)
+                        }
                     } else {
                         let okMsg = self.loc("Đã đổi biểu tượng ứng dụng thành công!", "App icon changed successfully!")
                         print("[AppSettings] \(okMsg)")
