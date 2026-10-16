@@ -2,6 +2,7 @@
 // Project: Scandium | Author: MeoHunter | License: GPL-3.0
 
 import SwiftUI
+import UIKit
 
 public enum AppThemeMode: String, CaseIterable, Identifiable {
     case dark = "dark"
@@ -26,6 +27,108 @@ public enum AppThemeMode: String, CaseIterable, Identifiable {
         case .dark: return .dark
         case .light: return .light
         case .system: return nil
+        }
+    }
+}
+
+public enum AppAccentColor: String, CaseIterable, Identifiable {
+    case green = "green"
+    case orange = "orange"
+    case cyan = "cyan"
+    case purple = "purple"
+
+    public var id: String { rawValue }
+
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "green", "spotifyGreen": self = .green
+        case "orange", "soundcloudOrange": self = .orange
+        case "cyan", "neonCyan": self = .cyan
+        case "purple", "violetPurple": self = .purple
+        default: return nil
+        }
+    }
+
+    // Backwards-compatible aliases
+    public static let spotifyGreen = AppAccentColor.green
+    public static let soundcloudOrange = AppAccentColor.orange
+    public static let neonCyan = AppAccentColor.cyan
+    public static let violetPurple = AppAccentColor.purple
+
+    public func title(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.green, .vietnamese):   return "Xanh lục"
+        case (.green, .english):      return "Emerald Green"
+        case (.orange, .vietnamese):  return "Cam"
+        case (.orange, .english):     return "Amber Orange"
+        case (.cyan, .vietnamese):    return "Xanh lam"
+        case (.cyan, .english):       return "Neon Cyan"
+        case (.purple, .vietnamese):  return "Tím"
+        case (.purple, .english):     return "Violet Purple"
+        }
+    }
+
+    public var color: Color {
+        switch self {
+        case .green:   return Color(red: 29/255, green: 185/255, blue: 84/255)
+        case .orange:  return Color(red: 255/255, green: 85/255, blue: 0/255)
+        case .cyan:    return Color(red: 0/255, green: 229/255, blue: 255/255)
+        case .purple:  return Color(red: 187/255, green: 134/255, blue: 252/255)
+        }
+    }
+}
+
+public enum AppIconOption: String, CaseIterable, Identifiable {
+    case `default` = "default"
+    case orange = "AppIcon-Orange"
+    case cyan = "AppIcon-Cyan"
+    case purple = "AppIcon-Purple"
+    case monochrome = "AppIcon-Monochrome"
+
+    public var id: String { rawValue }
+
+    public var iconName: String? {
+        switch self {
+        case .default: return nil
+        case .orange: return "AppIcon-Orange"
+        case .cyan: return "AppIcon-Cyan"
+        case .purple: return "AppIcon-Purple"
+        case .monochrome: return "AppIcon-Monochrome"
+        }
+    }
+
+    public func title(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.default, .vietnamese):    return "Scandium Mặc định (Lục)"
+        case (.default, .english):       return "Scandium Default (Green)"
+        case (.orange, .vietnamese):     return "Cam Kim loại"
+        case (.orange, .english):        return "Amber Orange"
+        case (.cyan, .vietnamese):       return "Xanh Lam Điện tử"
+        case (.cyan, .english):          return "Electric Cyan"
+        case (.purple, .vietnamese):     return "Tím Huyền bí"
+        case (.purple, .english):        return "Violet Aura"
+        case (.monochrome, .vietnamese): return "Trắng Đen Đơn sắc"
+        case (.monochrome, .english):    return "Pure Monochrome"
+        }
+    }
+
+    public var previewColor: Color {
+        switch self {
+        case .default:    return Color(red: 29/255, green: 185/255, blue: 84/255)
+        case .orange:     return Color(red: 255/255, green: 120/255, blue: 20/255)
+        case .cyan:       return Color(red: 0/255, green: 210/255, blue: 255/255)
+        case .purple:     return Color(red: 180/255, green: 100/255, blue: 255/255)
+        case .monochrome: return Color(red: 220/255, green: 225/255, blue: 235/255)
+        }
+    }
+
+    public var previewImageName: String {
+        switch self {
+        case .default: return "AppIcon"
+        case .orange: return "AppIcon-Orange"
+        case .cyan: return "AppIcon-Cyan"
+        case .purple: return "AppIcon-Purple"
+        case .monochrome: return "AppIcon-Monochrome"
         }
     }
 }
@@ -63,6 +166,34 @@ public enum AudioQualitySetting: String, CaseIterable, Identifiable {
     }
 }
 
+public enum SleepTimerOption: Int, CaseIterable, Identifiable {
+    case off = 0
+    case min15 = 15
+    case min30 = 30
+    case min45 = 45
+    case min60 = 60
+    case endOfTrack = -1
+
+    public var id: Int { rawValue }
+
+    public func title(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.off, .vietnamese):        return "Tắt"
+        case (.off, .english):           return "Off"
+        case (.min15, .vietnamese):      return "15 phút"
+        case (.min15, .english):         return "15 minutes"
+        case (.min30, .vietnamese):      return "30 phút"
+        case (.min30, .english):         return "30 minutes"
+        case (.min45, .vietnamese):      return "45 phút"
+        case (.min45, .english):         return "45 minutes"
+        case (.min60, .vietnamese):      return "60 phút (1 giờ)"
+        case (.min60, .english):         return "60 minutes (1 hr)"
+        case (.endOfTrack, .vietnamese): return "Hết bài hát hiện tại"
+        case (.endOfTrack, .english):    return "End of current track"
+        }
+    }
+}
+
 public final class AppSettings: ObservableObject {
     public static let shared = AppSettings()
 
@@ -71,6 +202,12 @@ public final class AppSettings: ObservableObject {
     @Published public var themeMode: AppThemeMode {
         didSet {
             UserDefaults.standard.set(themeMode.rawValue, forKey: "scandium_theme_mode")
+        }
+    }
+
+    @Published public var accentColor: AppAccentColor {
+        didSet {
+            UserDefaults.standard.set(accentColor.rawValue, forKey: "scandium_accent_color")
         }
     }
 
@@ -99,11 +236,49 @@ public final class AppSettings: ObservableObject {
         }
     }
 
+    @Published public var pauseOnHeadphoneDisconnect: Bool {
+        didSet {
+            UserDefaults.standard.set(pauseOnHeadphoneDisconnect, forKey: "scandium_pause_on_headphone_disconnect")
+        }
+    }
+
+    @Published public var autoSkipOnError: Bool {
+        didSet {
+            UserDefaults.standard.set(autoSkipOnError, forKey: "scandium_auto_skip_on_error")
+        }
+    }
+
+    @Published public var showWaveform: Bool {
+        didSet {
+            UserDefaults.standard.set(showWaveform, forKey: "scandium_show_waveform")
+        }
+    }
+
+    @Published public var enableHaptics: Bool {
+        didSet {
+            UserDefaults.standard.set(enableHaptics, forKey: "scandium_enable_haptics")
+        }
+    }
+
+    @Published public var currentAppIcon: AppIconOption {
+        didSet {
+            UserDefaults.standard.set(currentAppIcon.rawValue, forKey: "scandium_app_icon")
+        }
+    }
+
+    @Published public var sleepTimerOption: SleepTimerOption = .off
+
     // MARK: - Init
 
     private init() {
         let savedTheme = UserDefaults.standard.string(forKey: "scandium_theme_mode") ?? AppThemeMode.dark.rawValue
         self.themeMode = AppThemeMode(rawValue: savedTheme) ?? .dark
+
+        let savedAccent = UserDefaults.standard.string(forKey: "scandium_accent_color") ?? AppAccentColor.green.rawValue
+        self.accentColor = AppAccentColor(rawValue: savedAccent) ?? .green
+
+        let savedIcon = UserDefaults.standard.string(forKey: "scandium_app_icon") ?? AppIconOption.default.rawValue
+        self.currentAppIcon = AppIconOption(rawValue: savedIcon) ?? .default
 
         let savedLang = UserDefaults.standard.string(forKey: "scandium_language") ?? AppLanguage.english.rawValue
         self.language = AppLanguage(rawValue: savedLang) ?? .english
@@ -118,6 +293,41 @@ public final class AppSettings: ObservableObject {
         if awake {
             UIApplication.shared.isIdleTimerDisabled = true
         }
+
+        self.pauseOnHeadphoneDisconnect = UserDefaults.standard.object(forKey: "scandium_pause_on_headphone_disconnect") as? Bool ?? true
+        self.autoSkipOnError = UserDefaults.standard.object(forKey: "scandium_auto_skip_on_error") as? Bool ?? true
+        self.showWaveform = UserDefaults.standard.object(forKey: "scandium_show_waveform") as? Bool ?? true
+        self.enableHaptics = UserDefaults.standard.object(forKey: "scandium_enable_haptics") as? Bool ?? true
+    }
+
+    // MARK: - App Icon Switcher
+
+    public func setAppIcon(_ option: AppIconOption) {
+        currentAppIcon = option
+        triggerHaptic()
+
+        DispatchQueue.main.async {
+            guard UIApplication.shared.supportsAlternateIcons else {
+                return
+            }
+
+            if UIApplication.shared.alternateIconName == option.iconName {
+                return
+            }
+
+            UIApplication.shared.setAlternateIconName(option.iconName) { error in
+                if let error = error {
+                    print("[AppSettings] Error setting icon: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    // MARK: - Haptic Feedback Helper
+
+    public func triggerHaptic() {
+        guard enableHaptics else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     // MARK: - Dark Mode Detection

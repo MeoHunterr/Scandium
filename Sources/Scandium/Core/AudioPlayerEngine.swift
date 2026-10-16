@@ -41,6 +41,7 @@ final class AudioPlayerEngine: ObservableObject {
     @Published private(set) var currentIndex: Int = 0
     @Published var isShuffleEnabled: Bool = false
     @Published var isRepeatEnabled: Bool = false
+    @Published private(set) var sleepTimerRemainingSeconds: Int = 0
 
     // MARK: - Private Properties
 
@@ -48,6 +49,7 @@ final class AudioPlayerEngine: ObservableObject {
     private let player = AVPlayer()
     private var playerItem: AVPlayerItem?
     private var timeObserver: Any?
+    private var sleepTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private var artworkImage: UIImage?
 
@@ -69,6 +71,8 @@ final class AudioPlayerEngine: ObservableObject {
     }
 
     deinit {
+        sleepTimer?.invalidate()
+        sleepTimer = nil
         if let observer = timeObserver {
             player.removeTimeObserver(observer)
             timeObserver = nil
@@ -171,17 +175,13 @@ final class AudioPlayerEngine: ObservableObject {
     // MARK: - Internal Playback Setup
 
     private func startPlayback(url: URL, track: Track) {
-        // 1. Invalidate / cancel observers of old item before replacing
         cancellables.removeAll()
 
-        // 2. Create new item
         let newItem = AVPlayerItem(url: url)
         self.playerItem = newItem
 
-        // 3. Attach observers to new item
         setupItemObservers(item: newItem)
 
-        // 4. Replace current item in the persistent player and play
         player.replaceCurrentItem(with: newItem)
         player.play()
         if playbackRate != 1.0 {
@@ -232,6 +232,13 @@ final class AudioPlayerEngine: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] notification in
                 self?.handleAudioInterruption(notification)
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                self?.handleAudioRouteChange(notification)
             }
             .store(in: &cancellables)
     }
@@ -393,6 +400,15 @@ final class AudioPlayerEngine: ObservableObject {
     // MARK: - Playback Finished & Failed Handlers
 
     private func handlePlaybackFinished() {
+        // Sleep Timer: Stop at end of current track
+        if AppSettings.shared.sleepTimerOption == .endOfTrack {
+            AppSettings.shared.sleepTimerOption = .off
+            pause()
+            currentTime = duration
+            updateNowPlayingElapsedTime()
+            return
+        }
+
         if isRepeatEnabled && queue.count <= 1 {
             seek(to: 0)
             resume()
@@ -452,9 +468,29 @@ final class AudioPlayerEngine: ObservableObject {
             }
         }
         self.playbackState = .failed(message)
+
+        // Auto-skip on stream error if configured and queue has more songs
+        if AppSettings.shared.autoSkipOnError && !queue.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                guard let self = self, case .failed = self.playbackState else { return }
+                self.nextTrack()
+            }
+        }
     }
 
-    // MARK: - Audio Interruption Handling
+    // MARK: - Audio Interruption & Route Change (Headphone Unplug)
+
+    private func handleAudioRouteChange(_ notification: Notification) {
+        guard AppSettings.shared.pauseOnHeadphoneDisconnect,
+              let dict = notification.userInfo,
+              let reasonValue = dict[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+
+        // When headphones/AirPods disconnect, automatically pause to prevent blasting speakers
+        if reason == .oldDeviceUnavailable {
+            pause()
+        }
+    }
 
     private func handleAudioInterruption(_ notification: Notification) {
         guard let dict = notification.userInfo else { return }
@@ -495,6 +531,37 @@ final class AudioPlayerEngine: ObservableObject {
             }
         @unknown default:
             break
+        }
+    }
+
+    // MARK: - Sleep Timer Engine
+
+    func setSleepTimer(_ option: SleepTimerOption) {
+        AppSettings.shared.sleepTimerOption = option
+        sleepTimer?.invalidate()
+        sleepTimer = nil
+
+        switch option {
+        case .off, .endOfTrack:
+            sleepTimerRemainingSeconds = 0
+        case .min15, .min30, .min45, .min60:
+            let totalSeconds = option.rawValue * 60
+            sleepTimerRemainingSeconds = totalSeconds
+            sleepTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+                guard let self = self else {
+                    timer.invalidate()
+                    return
+                }
+                if self.sleepTimerRemainingSeconds > 1 {
+                    self.sleepTimerRemainingSeconds -= 1
+                } else {
+                    self.sleepTimerRemainingSeconds = 0
+                    timer.invalidate()
+                    self.sleepTimer = nil
+                    AppSettings.shared.sleepTimerOption = .off
+                    self.pause()
+                }
+            }
         }
     }
 

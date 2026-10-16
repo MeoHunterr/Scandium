@@ -495,18 +495,16 @@ final class DiscoverDataStore: ObservableObject {
         let auth = SoundCloudAuthManager.shared
         let library = LibraryManager.shared
 
-        // 1. Personalized Tracks resolution
         async let persTask = fetchPersonalizedTracks(api: api, auth: auth, library: library, force: force)
-
-        // 2. Dynamic Quick Picks (user favorites + rotating queries with random offset)
         async let qpTask = fetchQuickPicks(api: api, auth: auth, library: library, force: force)
 
-        // 3. Rotating Curated Sections with random offsets on force refresh
+        let isEn = AppSettings.shared.language == .english
+        let trendingQuery = isEn ? "Global Top Hits" : "Top Vietnam"
         let trendingOffset = force ? Int.random(in: 0...5) : 0
         let chillOffset = force ? Int.random(in: 0...5) : 0
         let remixOffset = force ? Int.random(in: 0...5) : 0
 
-        async let trTask = safeSearch(api: api, query: "Top Vietnam", limit: 10, offset: trendingOffset)
+        async let trTask = safeSearch(api: api, query: trendingQuery, limit: 10, offset: trendingOffset)
         async let chTask = safeSearch(api: api, query: "Chill R&B", limit: 10, offset: chillOffset)
         async let rmTask = safeSearch(api: api, query: "Remix Lo-Fi", limit: 10, offset: remixOffset)
 
@@ -539,7 +537,6 @@ final class DiscoverDataStore: ObservableObject {
         var candidatePicks: [Track] = []
         var seenIDs = Set<Int>()
 
-        // 1. User personalized seeds (favorites, liked, recently played)
         let userSeeds = (auth.userLikedTracks + library.likedTracks + library.recentlyPlayed).shuffled()
         for track in userSeeds {
             if seenIDs.insert(track.id).inserted {
@@ -548,18 +545,26 @@ final class DiscoverDataStore: ObservableObject {
             }
         }
 
-        // 2. Rotating genre queries with randomized offsets to guarantee fresh results on every reload
-        let queryPool = [
+        let isEn = AppSettings.shared.language == .english
+        let queryPool = (isEn ? [
+            "Top Hits",
+            "Top Trending",
+            "EDM Festival",
+            "Acoustic Chill",
+            "Lo-Fi Beats",
+            "Indie Pop",
+            "Chill R&B",
+            "Deep House"
+        ] : [
             "V-Pop Hits",
             "Top Trending",
             "EDM Festival",
+            "Acoustic Chill",
+            "Nhạc Trẻ Remix",
+            "Indie Việt",
             "Chill R&B",
-            "Acoustic Pop",
-            "Vietnamese Indie",
-            "Remix Dance",
-            "Deep House",
-            "Lo-Fi Beats"
-        ].shuffled()
+            "Deep House"
+        ]).shuffled()
 
         for q in queryPool.prefix(2) {
             let offset = force ? Int.random(in: 0...10) : 0
@@ -646,20 +651,24 @@ final class DiscoverDataStore: ObservableObject {
             } catch {}
         }
 
-        // Priority 4: Dynamic client session recommendations with rich variety
-        let dynamicQueries = [
+        let dynamicQueries: [(String, String)] = isEn ? [
+            ("Today's Top Hits", "Trending music around the globe"),
+            ("Acoustic Chill", "Laid-back acoustic melodies"),
+            ("Electronic & Dance", "High-energy beats and rhythm"),
+            ("Lo-Fi Study Beats", "Smooth beats to focus and relax"),
+            ("Indie Discoveries", "Fresh independent sounds")
+        ] : [
             ("V-Pop Hot Hits", "Tuyển tập nhạc Việt thịnh hành"),
             ("Acoustic Chill", "Giai điệu mộc mạc thư giãn"),
             ("Deep Electronic & EDM", "Sôi động với năng lượng cao"),
             ("Lo-Fi Study Beats", "Tập trung và làm việc hiệu quả"),
             ("Indie Vibes", "Những thanh âm indie độc đáo")
         ]
-        let chosen = dynamicQueries.randomElement() ?? ("Discover Weekly", "Khám phá hàng tuần")
+        let defaultChoice = isEn ? ("Discover Weekly", "Curated weekly picks") : ("Khám phá hàng tuần", "Tuyển tập được chọn lọc")
+        let chosen = dynamicQueries.randomElement() ?? defaultChoice
         let randomOffset = force ? Int.random(in: 0...4) : 0
         let tracks = await safeSearch(api: api, query: chosen.0, limit: 12, offset: randomOffset)
-        let title = isEn ? chosen.0 : chosen.0
-        let subtitle = isEn ? "Curated discovery for your taste" : chosen.1
-        return (title, subtitle, tracks)
+        return (chosen.0, chosen.1, tracks)
     }
 
     private func safeSearch(api: SoundCloudAPI, query: String, limit: Int, offset: Int = 0) async -> [Track] {

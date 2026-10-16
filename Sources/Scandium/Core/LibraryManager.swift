@@ -12,11 +12,13 @@ final class LibraryManager: ObservableObject {
 
     @Published private(set) var likedTracks: [Track] = []
     @Published private(set) var recentlyPlayed: [Track] = []
+    @Published private(set) var userPlaylists: [SoundCloudPlaylist] = []
 
     // MARK: - Storage Keys
 
     private static let likedTracksKey = "scandium_liked_tracks_v1"
     private static let recentlyPlayedKey = "scandium_recently_played_v1"
+    private static let userPlaylistsKey = "scandium_user_playlists_v1"
     private static let maxRecentlyPlayed = 50
 
     // MARK: - Init
@@ -55,6 +57,26 @@ final class LibraryManager: ObservableObject {
         saveLikedTracks()
     }
 
+    /// Merges remote liked tracks into local liked tracks, avoiding duplicates
+    func syncLikedTracks(_ tracks: [Track]) {
+        var changed = false
+        for track in tracks.reversed() {
+            if !isLiked(track: track) {
+                likedTracks.insert(track, at: 0)
+                changed = true
+            }
+        }
+        if changed {
+            saveLikedTracks()
+        }
+    }
+
+    /// Synchronizes user playlists from SoundCloud account
+    func syncUserPlaylists(_ playlists: [SoundCloudPlaylist]) {
+        self.userPlaylists = playlists
+        saveUserPlaylists()
+    }
+
     // MARK: - Recently Played API
 
     func addToRecentlyPlayed(track: Track) {
@@ -78,8 +100,10 @@ final class LibraryManager: ObservableObject {
     func clearAllData() {
         likedTracks.removeAll()
         recentlyPlayed.removeAll()
+        userPlaylists.removeAll()
         UserDefaults.standard.removeObject(forKey: Self.likedTracksKey)
         UserDefaults.standard.removeObject(forKey: Self.recentlyPlayedKey)
+        UserDefaults.standard.removeObject(forKey: Self.userPlaylistsKey)
     }
 
     // MARK: - Persistence Helpers
@@ -96,6 +120,11 @@ final class LibraryManager: ObservableObject {
            let tracks = try? decoder.decode([Track].self, from: recentData) {
             self.recentlyPlayed = tracks
         }
+
+        if let plData = UserDefaults.standard.data(forKey: Self.userPlaylistsKey),
+           let playlists = try? decoder.decode([SoundCloudPlaylist].self, from: plData) {
+            self.userPlaylists = playlists
+        }
     }
 
     private func saveLikedTracks() {
@@ -109,6 +138,13 @@ final class LibraryManager: ObservableObject {
         let encoder = JSONEncoder()
         if let data = try? encoder.encode(recentlyPlayed) {
             UserDefaults.standard.set(data, forKey: Self.recentlyPlayedKey)
+        }
+    }
+
+    private func saveUserPlaylists() {
+        let encoder = JSONEncoder()
+        if let data = try? encoder.encode(userPlaylists) {
+            UserDefaults.standard.set(data, forKey: Self.userPlaylistsKey)
         }
     }
 }

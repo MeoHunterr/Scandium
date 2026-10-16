@@ -9,6 +9,7 @@ final class SoundCloudAuthManager: ObservableObject {
 
     // MARK: - Published State
 
+    @Published private(set) var isLoggedIn: Bool = false
     @Published private(set) var isAuthenticated: Bool = false
     @Published private(set) var currentUser: SoundCloudUser?
     @Published private(set) var oauthToken: String?
@@ -21,7 +22,8 @@ final class SoundCloudAuthManager: ObservableObject {
 
     // MARK: - Storage Keys
 
-    private let tokenKey = "scandium_soundcloud_oauth_token"
+    private let legacyTokenKey = "scandium_soundcloud_oauth_token"
+    private let scOAuthTokenKey = "sc_oauth_token"
     private let userKey = "scandium_soundcloud_current_user"
     private let playlistsKey = "scandium_soundcloud_user_playlists"
     private let followingsKey = "scandium_soundcloud_user_followings"
@@ -40,14 +42,25 @@ final class SoundCloudAuthManager: ObservableObject {
     // MARK: - Persistence
 
     private func loadPersistedState() {
-        if let token = UserDefaults.standard.string(forKey: tokenKey), !token.isEmpty {
+        let storedToken = KeychainHelper.loadString(key: scOAuthTokenKey) ??
+                          UserDefaults.standard.string(forKey: scOAuthTokenKey) ??
+                          UserDefaults.standard.string(forKey: legacyTokenKey)
+
+        if let token = storedToken, !token.isEmpty {
             self.oauthToken = token
+            self.isLoggedIn = true
             self.isAuthenticated = true
+
+            // Migrate plaintext token to Keychain and purge from UserDefaults
+            _ = KeychainHelper.saveString(key: scOAuthTokenKey, value: token)
+            UserDefaults.standard.removeObject(forKey: scOAuthTokenKey)
+            UserDefaults.standard.removeObject(forKey: legacyTokenKey)
         }
 
         if let userData = UserDefaults.standard.data(forKey: userKey),
            let user = try? JSONDecoder().decode(SoundCloudUser.self, from: userData) {
             self.currentUser = user
+            self.isLoggedIn = true
             self.isAuthenticated = true
         }
 
@@ -70,9 +83,13 @@ final class SoundCloudAuthManager: ObservableObject {
 
     private func savePersistedState() {
         if let token = oauthToken {
-            UserDefaults.standard.set(token, forKey: tokenKey)
+            KeychainHelper.saveString(key: scOAuthTokenKey, value: token)
+            UserDefaults.standard.removeObject(forKey: scOAuthTokenKey)
+            UserDefaults.standard.removeObject(forKey: legacyTokenKey)
         } else {
-            UserDefaults.standard.removeObject(forKey: tokenKey)
+            KeychainHelper.delete(key: scOAuthTokenKey)
+            UserDefaults.standard.removeObject(forKey: scOAuthTokenKey)
+            UserDefaults.standard.removeObject(forKey: legacyTokenKey)
         }
 
         if let user = currentUser, let data = try? JSONEncoder().encode(user) {
@@ -94,34 +111,58 @@ final class SoundCloudAuthManager: ObservableObject {
         }
     }
 
-    // MARK: - Sign In: OAuth Token Captured (from WebView or Manual)
+    // MARK: - Save OAuth Token
 
     @MainActor
-    func handleOAuthToken(_ token: String) async {
+    func saveToken(_ token: String) {
         let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanToken.isEmpty else { return }
 
+        KeychainHelper.saveString(key: scOAuthTokenKey, value: cleanToken)
+        UserDefaults.standard.removeObject(forKey: scOAuthTokenKey)
+        UserDefaults.standard.removeObject(forKey: legacyTokenKey)
+
         self.oauthToken = cleanToken
+        self.isLoggedIn = true
+        self.isAuthenticated = true
         self.isLoading = true
         self.errorMessage = nil
 
+        Task {
+            await self.fetchUserProfileAndSync(token: cleanToken)
+        }
+    }
+
+    @MainActor
+    func handleOAuthToken(_ token: String) async {
+        saveToken(token)
+    }
+
+    // MARK: - Fetch User Profile & Auto-Sync Library
+
+    @MainActor
+    private func fetchUserProfileAndSync(token: String) async {
         guard let api = api else {
             self.isLoading = false
-            self.isAuthenticated = true
             self.savePersistedState()
             return
         }
 
         do {
-            let me = try await api.getMe(oauthToken: cleanToken)
+            // Gọi endpoint /me để lấy ID (urn/id), username, avatar_url
+            let me = try await api.getMe(oauthToken: token)
             self.currentUser = me
+            self.isLoggedIn = true
             self.isAuthenticated = true
             self.savePersistedState()
-            await syncLibrary()
+
+            // Tự động đồng bộ likes và playlists
+            await syncLibraryInternal(token: token, user: me)
         } catch {
-            print("[ScandiumAuth] getMe failed: \(error.localizedDescription)")
+            print("[ScandiumAuth] /me request failed: \(error.localizedDescription)")
             self.errorMessage = AppSettings.shared.loc("Không thể tải hồ sơ: \(error.localizedDescription)", "Unable to fetch profile: \(error.localizedDescription)")
-            self.isAuthenticated = true // Keep authenticated if token is valid
+            self.isLoggedIn = true
+            self.isAuthenticated = true
             self.savePersistedState()
         }
 
@@ -146,6 +187,7 @@ final class SoundCloudAuthManager: ObservableObject {
         do {
             let resolvedUser = try await api.resolveURL(url: clean)
             self.currentUser = resolvedUser
+            self.isLoggedIn = true
             self.isAuthenticated = true
             self.savePersistedState()
             await syncLibrary()
@@ -160,36 +202,50 @@ final class SoundCloudAuthManager: ObservableObject {
 
     @MainActor
     func syncLibrary() async {
-        guard let api = api, let user = currentUser else { return }
+        guard let user = currentUser else { return }
         self.isLoading = true
+        await syncLibraryInternal(token: oauthToken, user: user)
+        self.isLoading = false
+    }
 
-        do {
-            async let fetchedLikes = api.getUserLikes(userID: user.id, oauthToken: oauthToken, limit: 50)
-            async let fetchedPlaylists = api.getUserPlaylists(userID: user.id, oauthToken: oauthToken)
-            async let fetchedFollowings = api.getUserFollowings(userID: user.id, oauthToken: oauthToken, limit: 30)
+    @MainActor
+    private func syncLibraryInternal(token: String?, user: SoundCloudUser) async {
+        guard let api = api else { return }
 
-            let (likes, playlists, followings) = try await (fetchedLikes, fetchedPlaylists, fetchedFollowings)
-            let uniqueLikes = deduplicateTracks(likes)
-
-            self.userLikedTracks = uniqueLikes
-            self.userPlaylists = playlists
-            self.userAlbums = playlists.filter { ($0.trackCount ?? 0) >= 5 || ($0.title.lowercased().contains("album") || $0.title.lowercased().contains("ep")) }
-            self.userFollowings = followings
-
-            // Also merge into local LibraryManager so they appear across the app
-            for track in uniqueLikes {
-                if !LibraryManager.shared.isLiked(track: track) {
-                    LibraryManager.shared.toggleLike(track: track)
-                }
+        var likes: [Track] = []
+        if let token = token, !token.isEmpty {
+            do {
+                likes = try await api.getMeLikesTracks(oauthToken: token, limit: 50)
+            } catch {
+                likes = (try? await api.getUserLikes(userID: user.id, oauthToken: token, limit: 50)) ?? []
             }
-
-            self.savePersistedState()
-        } catch {
-            print("[ScandiumAuth] syncLibrary failed: \(error.localizedDescription)")
-            self.errorMessage = AppSettings.shared.loc("Lỗi khi đồng bộ danh sách: \(error.localizedDescription)", "Failed to synchronize library: \(error.localizedDescription)")
+        } else {
+            likes = (try? await api.getUserLikes(userID: user.id, oauthToken: nil, limit: 50)) ?? []
         }
 
-        self.isLoading = false
+        var playlists: [SoundCloudPlaylist] = []
+        if let token = token, !token.isEmpty {
+            do {
+                playlists = try await api.getMePlaylists(oauthToken: token)
+            } catch {
+                playlists = (try? await api.getUserPlaylists(userID: user.id, oauthToken: token)) ?? []
+            }
+        } else {
+            playlists = (try? await api.getUserPlaylists(userID: user.id, oauthToken: nil)) ?? []
+        }
+
+        let followings = (try? await api.getUserFollowings(userID: user.id, oauthToken: token, limit: 30)) ?? []
+
+        let uniqueLikes = deduplicateTracks(likes)
+        self.userLikedTracks = uniqueLikes
+        self.userPlaylists = playlists
+        self.userAlbums = playlists.filter { ($0.trackCount ?? 0) >= 5 || ($0.title.lowercased().contains("album") || $0.title.lowercased().contains("ep")) }
+        self.userFollowings = followings
+
+        LibraryManager.shared.syncLikedTracks(uniqueLikes)
+        LibraryManager.shared.syncUserPlaylists(playlists)
+
+        self.savePersistedState()
     }
 
     private func deduplicateTracks(_ tracks: [Track]) -> [Track] {
@@ -208,6 +264,7 @@ final class SoundCloudAuthManager: ObservableObject {
 
     @MainActor
     func logout() {
+        self.isLoggedIn = false
         self.isAuthenticated = false
         self.currentUser = nil
         self.oauthToken = nil
@@ -217,10 +274,14 @@ final class SoundCloudAuthManager: ObservableObject {
         self.userLikedTracks = []
         self.errorMessage = nil
 
-        UserDefaults.standard.removeObject(forKey: tokenKey)
+        KeychainHelper.delete(key: scOAuthTokenKey)
+        UserDefaults.standard.removeObject(forKey: scOAuthTokenKey)
+        UserDefaults.standard.removeObject(forKey: legacyTokenKey)
         UserDefaults.standard.removeObject(forKey: userKey)
         UserDefaults.standard.removeObject(forKey: playlistsKey)
         UserDefaults.standard.removeObject(forKey: followingsKey)
         UserDefaults.standard.removeObject(forKey: userLikesKey)
+
+        LibraryManager.shared.syncUserPlaylists([])
     }
 }

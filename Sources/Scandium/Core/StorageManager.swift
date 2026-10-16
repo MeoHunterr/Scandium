@@ -54,45 +54,47 @@ final class StorageManager: ObservableObject {
     // MARK: - Calculate Usage
 
     func refreshUsage() {
-        let fileManager = FileManager.default
-
-        // 1. Image cache: from URLCache currentDiskUsage
-        let urlCacheDisk = Int64(URLCache.shared.currentDiskUsage)
-
-        // 2. Audio & temporary network cache: tmp directory + Caches folder
-        var tmpBytes: Int64 = 0
-        let tmpDir = NSTemporaryDirectory()
-        tmpBytes += directorySize(url: URL(fileURLWithPath: tmpDir))
-
-        if let cachesURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            let totalCaches = directorySize(url: cachesURL)
-            // Anything beyond URLCache in caches
-            let nonURLCache = max(0, totalCaches - urlCacheDisk)
-            tmpBytes += nonURLCache
-        }
-
-        // 3. User data: UserDefaults plist files + Application Support
-        var userBytes: Int64 = 0
-        if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            userBytes += directorySize(url: appSupport)
-        }
-        // Account for likedTracks and recentlyPlayed JSON stored in UserDefaults
-        if let likedData = UserDefaults.standard.data(forKey: "scandium_liked_tracks") {
-            userBytes += Int64(likedData.count)
-        }
-        if let recentData = UserDefaults.standard.data(forKey: "scandium_recently_played") {
-            userBytes += Int64(recentData.count)
-        }
-        if userBytes == 0 {
-            userBytes = 4096 // Base minimum for profile & preferences
-        }
-
-        DispatchQueue.main.async { [weak self] in
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
-            self.imageCacheBytes = max(urlCacheDisk, 0)
-            self.audioNetworkBytes = max(tmpBytes, 0)
-            self.userDataBytes = userBytes
-            self.totalBytes = self.imageCacheBytes + self.audioNetworkBytes + self.userDataBytes
+            let fileManager = FileManager.default
+
+            let urlCacheDisk = Int64(URLCache.shared.currentDiskUsage)
+
+            var tmpBytes: Int64 = 0
+            let tmpDir = NSTemporaryDirectory()
+            tmpBytes += self.directorySize(url: URL(fileURLWithPath: tmpDir))
+
+            if let cachesURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
+                let totalCaches = self.directorySize(url: cachesURL)
+                let nonURLCache = max(0, totalCaches - urlCacheDisk)
+                tmpBytes += nonURLCache
+            }
+
+            var userBytes: Int64 = 0
+            if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+                userBytes += self.directorySize(url: appSupport)
+            }
+            if let likedData = UserDefaults.standard.data(forKey: "scandium_liked_tracks") {
+                userBytes += Int64(likedData.count)
+            }
+            if let recentData = UserDefaults.standard.data(forKey: "scandium_recently_played") {
+                userBytes += Int64(recentData.count)
+            }
+            if userBytes == 0 {
+                userBytes = 4096
+            }
+
+            let finalImageBytes = max(urlCacheDisk, 0)
+            let finalAudioBytes = max(tmpBytes, 0)
+            let finalUserBytes = userBytes
+            let finalTotal = finalImageBytes + finalAudioBytes + finalUserBytes
+
+            DispatchQueue.main.async {
+                self.imageCacheBytes = finalImageBytes
+                self.audioNetworkBytes = finalAudioBytes
+                self.userDataBytes = finalUserBytes
+                self.totalBytes = finalTotal
+            }
         }
     }
 
@@ -122,6 +124,26 @@ final class StorageManager: ObservableObject {
             }
         }
 
+        refreshUsage()
+    }
+
+    /// Clears only cached artwork images
+    func clearImageCacheOnly() {
+        ImageCacheStore.shared.clear()
+        URLCache.shared.removeAllCachedResponses()
+        refreshUsage()
+    }
+
+    /// Clears only temporary audio and stream buffer files
+    func clearAudioCacheOnly() {
+        let fileManager = FileManager.default
+        let tmpDir = NSTemporaryDirectory()
+        if let tmpFiles = try? fileManager.contentsOfDirectory(atPath: tmpDir) {
+            for file in tmpFiles {
+                let fullPath = (tmpDir as NSString).appendingPathComponent(file)
+                try? fileManager.removeItem(atPath: fullPath)
+            }
+        }
         refreshUsage()
     }
 

@@ -1,0 +1,100 @@
+name: "Problem with Scandium itself"
+description: "Scandium crashes, freezes, won't install, won't play audio, or something in its own screens is wrong."
+title: "[Bug]: "
+labels: ["bug", "scandium"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is for problems with Scandium itself. If a particular track or SoundCloud playlist doesn't work, verify your network connection and SoundCloud account status first.
+
+        **Issues without logs or the details below will be closed.** Logs are how problems get fixed.
+
+  - type: dropdown
+    id: problem_kind
+    attributes:
+      label: "What kind of problem is it?"
+      options:
+        - "App crash or freeze"
+        - "Audio playback won't start or cuts out"
+        - "App won't install or launch (TrollStore / Sideload)"
+        - "SoundCloud account sync / login issue"
+        - "UI / Layout / Visual glitch"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: "What happened?"
+      description: "What you did, step by step, what you expected, and what happened instead."
+      placeholder: |
+        1. Open Scandium
+        2. Tap on ...
+        3. Observed: ...
+        4. Expected: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Logs"
+      description: |
+        Required. Attach logs (drag files or paste here).
+        You can find diagnostic logs in Settings › Profile › Debug info, or iOS Analytics & Improvements › Analytics Data.
+        If Scandium crashed, reopen it or attach the crash log (.ips).
+        A screenshot or screen recording helps too.
+      placeholder: "Paste logs or drag-and-drop log files / crash reports here..."
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: "Scandium version"
+      description: "The top of Settings or Profile shows it, for example 'Version 1.3.0 · build 1'. Copy the whole line."
+      placeholder: "Version 1.3.0"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: "Device"
+      placeholder: "e.g., iPhone 13 Pro, iPad Air 5"
+    validations:
+      required: true
+
+  - type: input
+    id: ios_version
+    attributes:
+      label: "iOS version"
+      placeholder: "e.g., iOS 16.5, iOS 17.2, iOS 15.4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation_method
+    attributes:
+      label: "How did you install Scandium?"
+      options:
+        - "TrollStore"
+        - "AltStore / SideStore"
+        - "Sideloadly"
+        - "Scarlet / Esign"
+        - "Xcode / xtool local build"
+        - "Other"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: "Before you send it"
+      options:
+        - label: "I am on the newest Scandium release."
+          required: true
+        - label: "I searched the existing issues and this one is not already reported."
+          required: true

@@ -1,0 +1,38 @@
+name: "Feature request"
+description: "Something Scandium could do that it doesn't."
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a feature to make Scandium better!
+        Scandium focuses on lightweight, high-performance, and native playback experience.
+
+  - type: textarea
+    id: what_feature
+    attributes:
+      label: "What would you like Scandium to do?"
+      description: "A clear and concise description of the feature or capability you want added."
+      placeholder: "I would like Scandium to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: why_feature
+    attributes:
+      label: "Why? What would it let you do?"
+      description: "Explain why this feature is useful and how it would improve your listening experience."
+      placeholder: "This would allow me to..."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: "Before you send it"
+      options:
+        - label: "I searched the existing issues and this is not a duplicate."
+          required: true
+        - label: "This feature respects the open-source (FOSS) and lightweight spirit of Scandium."
+          required: false

@@ -1,9 +1,9 @@
-// LiquidGlassModifier.swift — Design System: Threads (Meta) x Spotify (Natural, Dark, Sleek)
+// LiquidGlassModifier.swift — Design tokens and liquid glass modifiers for Scandium
 // Project: Scandium | Author: MeoHunter | License: GPL-3.0
 
 import SwiftUI
 
-// MARK: - Design Tokens (Threads x Spotify)
+// MARK: - Design Tokens
 
 enum ScandiumTheme {
     static var isDark: Bool {
@@ -43,7 +43,13 @@ enum ScandiumTheme {
     static let hairlinewidth: CGFloat = 0.5
 
     // Accents
-    static let spotifyGreen = Color(red: 29/255, green: 185/255, blue: 84/255) // #1DB954
+    static var accent: Color {
+        AppSettings.shared.accentColor.color
+    }
+    static var spotifyGreen: Color {
+        accent
+    }
+    static let defaultGreen = Color(red: 29/255, green: 185/255, blue: 84/255)
     static let accentOrange = Color(red: 1.0, green: 0.35, blue: 0.12)
     static let pureWhite = Color.white
 

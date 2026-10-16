@@ -9,13 +9,15 @@
     </array>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
+        <true/>
+        <key>NSAllowsArbitraryLoadsForMedia</key>
         <true/>
     </dict>
     <key>CFBundleShortVersionString</key>
-    <string>1.2.0</string>
+    <string>1.3.0</string>
     <key>CFBundleVersion</key>
-    <string>1.2.0</string>
+    <string>1.3.0</string>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIRequiresFullScreen</key>
@@ -31,6 +33,49 @@
             <key>CFBundleIconName</key>
             <string>AppIcon</string>
         </dict>
+        <key>CFBundleAlternateIcons</key>
+        <dict>
+            <key>AppIcon-Orange</key>
+            <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                    <string>AppIcon-Orange</string>
+                    <string>AppIcon-Orange60x60</string>
+                </array>
+                <key>UIPrerenderedIcon</key>
+                <false/>
+            </dict>
+            <key>AppIcon-Cyan</key>
+            <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                    <string>AppIcon-Cyan</string>
+                    <string>AppIcon-Cyan60x60</string>
+                </array>
+                <key>UIPrerenderedIcon</key>
+                <false/>
+            </dict>
+            <key>AppIcon-Purple</key>
+            <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                    <string>AppIcon-Purple</string>
+                    <string>AppIcon-Purple60x60</string>
+                </array>
+                <key>UIPrerenderedIcon</key>
+                <false/>
+            </dict>
+            <key>AppIcon-Monochrome</key>
+            <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                    <string>AppIcon-Monochrome</string>
+                    <string>AppIcon-Monochrome60x60</string>
+                </array>
+                <key>UIPrerenderedIcon</key>
+                <false/>
+            </dict>
+        </dict>
     </dict>
     <key>CFBundleIcons~ipad</key>
     <dict>
@@ -43,6 +88,53 @@
             </array>
             <key>CFBundleIconName</key>
             <string>AppIcon</string>
+        </dict>
+        <key>CFBundleAlternateIcons</key>
+        <dict>
+            <key>AppIcon-Orange</key>
+            <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                    <string>AppIcon-Orange</string>
+                    <string>AppIcon-Orange60x60</string>
+                    <string>AppIcon-Orange76x76</string>
+                </array>
+                <key>UIPrerenderedIcon</key>
+                <false/>
+            </dict>
+            <key>AppIcon-Cyan</key>
+            <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                    <string>AppIcon-Cyan</string>
+                    <string>AppIcon-Cyan60x60</string>
+                    <string>AppIcon-Cyan76x76</string>
+                </array>
+                <key>UIPrerenderedIcon</key>
+                <false/>
+            </dict>
+            <key>AppIcon-Purple</key>
+            <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                    <string>AppIcon-Purple</string>
+                    <string>AppIcon-Purple60x60</string>
+                    <string>AppIcon-Purple76x76</string>
+                </array>
+                <key>UIPrerenderedIcon</key>
+                <false/>
+            </dict>
+            <key>AppIcon-Monochrome</key>
+            <dict>
+                <key>CFBundleIconFiles</key>
+                <array>
+                    <string>AppIcon-Monochrome</string>
+                    <string>AppIcon-Monochrome60x60</string>
+                    <string>AppIcon-Monochrome76x76</string>
+                </array>
+                <key>UIPrerenderedIcon</key>
+                <false/>
+            </dict>
         </dict>
     </dict>
 </dict>

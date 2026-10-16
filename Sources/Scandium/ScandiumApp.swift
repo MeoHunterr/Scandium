@@ -18,10 +18,8 @@ struct ScandiumApp: App {
     @State private var showSafeMode: Bool = false
 
     init() {
-        // 1. Install crash handlers immediately — before anything else
         CrashDiagnosticManager.shared.install()
 
-        // 2. Create lightweight objects only (no heavy system calls)
         let scraperInstance = ClientIDScraper()
         let apiInstance = SoundCloudAPI(scraper: scraperInstance)
         let playerInstance = AudioPlayerEngine(api: apiInstance)
@@ -32,10 +30,9 @@ struct ScandiumApp: App {
         _player = StateObject(wrappedValue: playerInstance)
         _library = StateObject(wrappedValue: libraryInstance)
 
-        // Wire up auth manager (reads only UserDefaults — safe in init)
         SoundCloudAuthManager.shared.setAPI(apiInstance)
+        AudioPlayerEngineWrapper.sharedEngine = playerInstance
 
-        // 3. Configure UIKit appearance (pure UI, no system APIs)
         configureAppearance()
     }
 
@@ -116,6 +113,7 @@ struct SafeModeView: View {
     let onReset: () -> Void
     let onContinue: () -> Void
 
+    @ObservedObject private var settings = AppSettings.shared
     @State private var showFullLog: Bool = false
 
     init(crashLog: String, onReset: @escaping () -> Void, onContinue: @escaping () -> Void) {
@@ -130,39 +128,40 @@ struct SafeModeView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // Header
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 10) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.system(size: 28, weight: .bold))
                                 .foregroundColor(.yellow)
-                            Text("Chế độ An Toàn")
+                            Text(settings.loc("Chế độ An Toàn", "Safe Mode"))
                                 .font(.system(size: 24, weight: .bold))
                                 .foregroundColor(.white)
                         }
-                        Text("Scandium đã gặp sự cố ở lần mở trước. Đây là báo cáo lỗi để giúp chẩn đoán vấn đề.")
-                            .font(.system(size: 14))
-                            .foregroundColor(Color(red: 0.655, green: 0.655, blue: 0.655))
-                            .lineLimit(nil)
+                        Text(settings.loc(
+                            "Scandium đã gặp sự cố ở lần mở trước. Đây là báo cáo lỗi để giúp chẩn đoán vấn đề.",
+                            "Scandium encountered an issue during the previous session. Here is the diagnostic report."
+                        ))
+                        .font(.system(size: 14))
+                        .foregroundColor(Color(red: 0.655, green: 0.655, blue: 0.655))
+                        .lineLimit(nil)
                     }
                     .padding(.top, 60)
 
-                    // Crash log (truncated, expand on tap)
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Crash Report")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundColor(.white)
                             Spacer()
-                            Button(showFullLog ? "Thu gọn" : "Xem đầy đủ") {
+                            Button(showFullLog ? settings.loc("Thu gọn", "Collapse") : settings.loc("Xem đầy đủ", "Expand")) {
                                 showFullLog.toggle()
                             }
                             .font(.system(size: 12))
-                            .foregroundColor(Color(red: 29/255, green: 185/255, blue: 84/255))
+                            .foregroundColor(settings.accentColor.color)
                         }
 
                         ScrollView(.vertical) {
-                            Text(showFullLog ? crashLog : String(crashLog.prefix(800)) + (crashLog.count > 800 ? "\n…(còn nữa)" : ""))
+                            Text(showFullLog ? crashLog : String(crashLog.prefix(800)) + (crashLog.count > 800 ? settings.loc("\n…(còn nữa)", "\n…(more)") : ""))
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(Color(red: 0.8, green: 0.8, blue: 0.8))
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -174,18 +173,17 @@ struct SafeModeView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
 
-                    // Action buttons
                     VStack(spacing: 12) {
                         Button(action: onContinue) {
                             HStack {
                                 Image(systemName: "arrow.right.circle.fill")
-                                Text("Tiếp tục vào App")
+                                Text(settings.loc("Tiếp tục vào App", "Continue to App"))
                                     .font(.body.weight(.semibold))
                             }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
                             .foregroundColor(.white)
-                            .background(Color(red: 29/255, green: 185/255, blue: 84/255))
+                            .background(settings.accentColor.color)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -193,7 +191,7 @@ struct SafeModeView: View {
                         Button(action: onReset) {
                             HStack {
                                 Image(systemName: "trash.fill")
-                                Text("Xóa toàn bộ dữ liệu đệm & Reset App")
+                                Text(settings.loc("Xóa toàn bộ dữ liệu đệm & Đặt lại", "Clear All Cache & Reset"))
                                     .font(.body.weight(.semibold))
                             }
                             .frame(maxWidth: .infinity)

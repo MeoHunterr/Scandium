@@ -95,7 +95,6 @@ final class ClientIDScraper: ObservableObject {
     /// and asynchronously refreshing in the background to prevent blocking UI requests.
     @discardableResult
     func getClientID() async throws -> String {
-        // 1. Manual override always has top priority
         if let manual = Self.loadManualClientID() {
             await MainActor.run {
                 self.clientID = manual
@@ -104,7 +103,6 @@ final class ClientIDScraper: ObservableObject {
             return manual
         }
 
-        // 2. Unexpired cached ID
         if let cached = Self.loadCachedClientID(), !Self.isCacheExpired() {
             await MainActor.run {
                 self.clientID = cached
@@ -113,7 +111,6 @@ final class ClientIDScraper: ObservableObject {
             return cached
         }
 
-        // 3. Fast fallback: return working fallback immediately and refresh in background
         if let current = clientID ?? Self.fallbackClientIDs.first {
             Task { [weak self] in
                 _ = try? await self?.refreshClientID()
@@ -121,7 +118,6 @@ final class ClientIDScraper: ObservableObject {
             return current
         }
 
-        // 4. Scrape fresh ID with fallbacks
         return try await refreshClientID()
     }
 
@@ -430,21 +426,22 @@ enum ScraperError: LocalizedError {
     case allEndpointsFailed(String)
 
     var errorDescription: String? {
+        let isEn = AppSettings.shared.language == .english
         switch self {
         case .noScriptsFound:
-            return "Không tìm thấy JavaScript bundle nào của SoundCloud."
+            return isEn ? "No JavaScript bundles found on SoundCloud." : "Không tìm thấy JavaScript bundle nào của SoundCloud."
         case .clientIDNotFound:
-            return "Không trích xuất được client_id từ các file JavaScript."
+            return isEn ? "Could not extract client_id from JavaScript assets." : "Không trích xuất được client_id từ các file JavaScript."
         case .invalidURL(let url):
-            return "URL không hợp lệ: \(url)"
+            return isEn ? "Invalid URL: \(url)" : "URL không hợp lệ: \(url)"
         case .httpError(let code):
-            return "Lỗi máy chủ HTTP \(code) khi tải trang SoundCloud."
+            return isEn ? "HTTP \(code) error while loading SoundCloud page." : "Lỗi máy chủ HTTP \(code) khi tải trang SoundCloud."
         case .invalidEncoding:
-            return "Không thể giải mã phản hồi UTF-8."
+            return isEn ? "Unable to decode UTF-8 response." : "Không thể giải mã phản hồi UTF-8."
         case .deallocated:
-            return "ClientIDScraper bị giải phóng bộ nhớ."
+            return isEn ? "ClientIDScraper was deallocated." : "ClientIDScraper bị giải phóng bộ nhớ."
         case .allEndpointsFailed(let msg):
-            return "Tất cả các nguồn lấy client_id đều thất bại: \(msg)"
+            return isEn ? "All client_id sources failed: \(msg)" : "Tất cả các nguồn lấy client_id đều thất bại: \(msg)"
         }
     }
 }

@@ -11,6 +11,7 @@ struct ProfileView: View {
     @ObservedObject private var settings = AppSettings.shared
 
     @State private var showSettingsSheet: Bool = false
+    @State private var showSoundCloudLoginSheet: Bool = false
     @State private var showWebLogin: Bool = false
     @State private var showManualAuthModal: Bool = false
     @State private var showManualIDModal: Bool = false
@@ -33,32 +34,25 @@ struct ProfileView: View {
                 headerView
                     .padding(.top, 8)
 
-                // User / Author Card
                 profileHeaderCard
-
-                // 0. Settings & Preferences Card
                 settingsSectionCard
-
-                // 1. Account Sync Section
                 accountSection
-
-                // 2. Service Token / Client ID Section
                 clientIDSection
-
-                // 3. Storage & Cache Section (Live calculation & distribution bar)
                 storageSection
-
-                // 4. Audio Quality Section
                 audioQualitySection
-
-                // 5. About Section
                 aboutSection
-
-                // 6. FOSS Open Source Disclaimer
                 fossDisclaimerView
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 130)
+        }
+        .sheet(isPresented: $showSoundCloudLoginSheet) {
+            SoundCloudLoginSheet(
+                isPresented: $showSoundCloudLoginSheet,
+                onLoginSuccess: {
+                    showToast(settings.loc("Đăng nhập và đồng bộ SoundCloud thành công!", "SoundCloud logged in and synced successfully!"))
+                }
+            )
         }
         .sheet(isPresented: $showWebLogin) {
             SoundCloudWebLoginView(
@@ -225,29 +219,141 @@ struct ProfileView: View {
             sectionHeader(title: settings.loc("Đồng bộ tài khoản (SoundCloud)", "Account Sync (SoundCloud)"))
 
             VStack(spacing: 0) {
-                if !auth.isAuthenticated {
-                    // Sign in Web
-                    Button(action: { showWebLogin = true }) {
-                        ThreadsRow(
-                            icon: "globe",
-                            iconColor: ScandiumTheme.spotifyGreen,
-                            title: settings.loc("Đồng bộ tài khoản SoundCloud", "Sync SoundCloud Account"),
-                            subtitle: settings.loc("Dán link hồ sơ công khai hoặc sử dụng Token dịch vụ", "Paste public profile link or use Service Token")
-                        )
+                if !auth.isLoggedIn {
+                    // Nút bấm phong cách tối giản: "Đồng bộ tài khoản SoundCloud" kèm icon person.crop.circle.badge.plus
+                    Button(action: { showSoundCloudLoginSheet = true }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "person.crop.circle.badge.plus")
+                                .font(.system(size: 20))
+                                .foregroundColor(ScandiumTheme.spotifyGreen)
+                                .frame(width: 28, height: 28)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(settings.loc("Đồng bộ tài khoản SoundCloud", "SoundCloud Account Sync"))
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(ScandiumTheme.textPrimary)
+                                Text(settings.loc("Tự động đăng nhập và đồng bộ bài hát yêu thích, playlist", "Sign in to auto-sync liked tracks & playlists"))
+                                    .font(.system(size: 12))
+                                    .foregroundColor(ScandiumTheme.subtext)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(ScandiumTheme.subtext.opacity(0.6))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
                     }
                     .buttonStyle(PlainButtonStyle())
 
-                    // Manual token / Profile link
+                    HairlineDivider()
+
+                    // PHẦN ĐĂNG NHẬP NÂNG CAO NHỎ Ở DƯỚI ĐĂNG NHẬP CHÍNH
+                    // 1. Nhập Token / Link hồ sơ thủ công
                     Button(action: { showManualAuthModal = true }) {
-                        ThreadsRow(
-                            icon: "link",
-                            title: settings.loc("Nhập Token dịch vụ hoặc Link hồ sơ", "Enter Service Token or Profile Link"),
-                            subtitle: settings.loc("Dán mã OAuth token hoặc đường dẫn soundcloud.com/user", "Paste OAuth token or soundcloud.com/user link"),
-                            showDivider: false
-                        )
+                        HStack(spacing: 10) {
+                            Image(systemName: "key.horizontal")
+                                .font(.system(size: 13))
+                                .foregroundColor(ScandiumTheme.subtext)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(settings.loc("Đăng nhập nâng cao (Token / Link hồ sơ)", "Advanced Sign-In (Token / Profile Link)"))
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(ScandiumTheme.textPrimary)
+                                Text(settings.loc("Dán mã OAuth token hoặc đường dẫn soundcloud.com/user", "Paste OAuth token or soundcloud.com/user link"))
+                                    .font(.system(size: 11))
+                                    .foregroundColor(ScandiumTheme.subtext)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11))
+                                .foregroundColor(ScandiumTheme.subtext.opacity(0.5))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 11)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    HairlineDivider()
+
+                    Button(action: { showOAuthGuideSheet = true }) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "questionmark.circle")
+                                .font(.system(size: 13))
+                                .foregroundColor(ScandiumTheme.subtext)
+                            Text(settings.loc("Hướng dẫn lấy OAuth Token (PC & iOS)", "Guide to obtain OAuth Token (PC & iOS)"))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(ScandiumTheme.subtext)
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 10))
+                                .foregroundColor(ScandiumTheme.subtext.opacity(0.5))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
                     }
                     .buttonStyle(PlainButtonStyle())
                 } else {
+                    HStack(spacing: 12) {
+                        if let user = auth.currentUser {
+                            CachedAsyncImage(
+                                url: user.highResAvatarURL,
+                                width: 44,
+                                height: 44,
+                                cornerRadius: 22
+                            )
+                        } else {
+                            Circle()
+                                .fill(ScandiumTheme.surfaceElevated)
+                                .frame(width: 44, height: 44)
+                                .overlay(
+                                    Image(systemName: "person.fill")
+                                        .foregroundColor(ScandiumTheme.spotifyGreen)
+                                )
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(auth.currentUser?.username ?? settings.loc("Tài khoản SoundCloud", "SoundCloud Account"))
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(ScandiumTheme.textPrimary)
+                                .lineLimit(1)
+
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(ScandiumTheme.spotifyGreen)
+                                Text(settings.loc("Đã liên kết", "Linked"))
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(ScandiumTheme.spotifyGreen)
+                            }
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(ScandiumTheme.spotifyGreen.opacity(0.15))
+                            .clipShape(Capsule())
+                        }
+
+                        Spacer()
+
+                        Button(action: {
+                            auth.logout()
+                            SoundCloudLoginSheet.clearSoundCloudCookies()
+                            showToast(settings.loc("Đã đăng xuất tài khoản!", "Logged out successfully!"))
+                        }) {
+                            Text(settings.loc("Đăng xuất", "Log Out"))
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(Color.red.opacity(0.75))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.red.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding(14)
+
+                    HairlineDivider()
+
                     // Sync library
                     Button(action: {
                         Task {
@@ -259,26 +365,9 @@ struct ProfileView: View {
                             icon: "arrow.triangle.2.circlepath",
                             iconColor: ScandiumTheme.spotifyGreen,
                             title: settings.loc("Đồng bộ thư viện tài khoản", "Sync Account Library"),
-                            subtitle: "\(auth.userLikedTracks.count) \(settings.loc("bài hát", "tracks")) • \(auth.userPlaylists.count) playlist"
-                        )
-                    }
-                    .buttonStyle(PlainButtonStyle())
-
-                    // Sign out
-                    Button(action: {
-                        auth.logout()
-                        showToast(settings.loc("Đã hủy đồng bộ tài khoản", "Account disconnected"))
-                    }) {
-                        ThreadsRow(
-                            icon: "rectangle.portrait.and.arrow.right",
-                            iconColor: Color.red,
-                            title: settings.loc("Hủy đồng bộ tài khoản", "Disconnect Account"),
+                            subtitle: "\(auth.userLikedTracks.count) \(settings.loc("bài hát", "tracks")) • \(auth.userPlaylists.count) playlist",
                             showDivider: false
-                        ) {
-                            Text(settings.loc("Đăng xuất", "Sign Out"))
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.red)
-                        }
+                        )
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
@@ -508,9 +597,9 @@ struct ProfileView: View {
                     title: settings.loc("Phiên bản", "Version"),
                     showDivider: true
                 ) {
-                    Text("1.2.0")
-                        .font(.system(size: 13))
-                        .foregroundColor(ScandiumTheme.subtext)
+                    Text("1.3.0")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundColor(ScandiumTheme.spotifyGreen)
                 }
 
                 ThreadsRow(

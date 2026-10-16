@@ -241,6 +241,7 @@ struct SoundCloudUser: Codable, Identifiable, Equatable, Hashable {
     let permalink: String?
     let permalinkURL: String?
     let uri: String?
+    let urn: String?
     let verified: Bool?
     let city: String?
     let countryCode: String?
@@ -250,7 +251,7 @@ struct SoundCloudUser: Codable, Identifiable, Equatable, Hashable {
     let playlistCount: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, username, permalink, uri, verified, city
+        case id, username, permalink, uri, urn, verified, city
         case fullName = "full_name"
         case avatarURL = "avatar_url"
         case permalinkURL = "permalink_url"

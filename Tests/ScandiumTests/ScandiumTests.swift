@@ -218,4 +218,40 @@ final class ScandiumTests: XCTestCase {
 
         manager.clearAllData()
     }
+
+    // MARK: - 5. SoundCloud User Decoding with URN Tests
+
+    func testDecodeSoundCloudUserWithURN() throws {
+        let json = """
+        {
+            "id": 1234567,
+            "username": "soundcloud_tester",
+            "full_name": "SoundCloud Tester",
+            "avatar_url": "https://i1.sndcdn.com/avatars-000123-large.jpg",
+            "urn": "soundcloud:users:1234567"
+        }
+        """.data(using: .utf8)!
+
+        let user = try JSONDecoder().decode(SoundCloudUser.self, from: json)
+        XCTAssertEqual(user.id, 1234567)
+        XCTAssertEqual(user.username, "soundcloud_tester")
+        XCTAssertEqual(user.urn, "soundcloud:users:1234567")
+        XCTAssertEqual(user.fullName, "SoundCloud Tester")
+    }
+
+    // MARK: - 6. AppSettings Preferences Tests
+
+    func testAppSettingsPreferences() {
+        let settings = AppSettings.shared
+        settings.accentColor = .soundcloudOrange
+        XCTAssertEqual(settings.accentColor, .soundcloudOrange)
+
+        settings.pauseOnHeadphoneDisconnect = true
+        XCTAssertTrue(settings.pauseOnHeadphoneDisconnect)
+
+        settings.autoSkipOnError = true
+        XCTAssertTrue(settings.autoSkipOnError)
+
+        settings.accentColor = .spotifyGreen
+    }
 }

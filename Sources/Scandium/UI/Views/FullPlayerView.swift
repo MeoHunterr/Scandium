@@ -8,6 +8,7 @@ struct FullPlayerView: View {
     @EnvironmentObject var api: SoundCloudAPI
     @EnvironmentObject var library: LibraryManager
     @Environment(\.presentationMode) var presentationMode
+    @ObservedObject private var settings = AppSettings.shared
 
     @State private var waveformSamples: [Float] = []
     @State private var dragProgress: Double? = nil
@@ -32,39 +33,32 @@ struct FullPlayerView: View {
                 .frame(width: screenWidth, height: screenHeight)
                 .clipped()
 
-                // Single non-scrolling vertical screen
                 VStack(spacing: 0) {
-                    // 1. Grabber bar + "ĐANG PHÁT" header
                     headerSection
                         .padding(.top, 12)
                         .padding(.bottom, 14)
 
                     Spacer(minLength: 6)
 
-                    // 2. Square Locked Artwork
                     artworkSection(artSize: artSize)
 
                     Spacer(minLength: 14)
 
-                    // 3. Track Info (Left-aligned Spotify style)
                     trackInfoSection
                         .padding(.horizontal, 24)
 
                     Spacer(minLength: 12)
 
-                    // 4. Scrubber / Slider (36pt) + Time Labels
                     scrubberSection
                         .padding(.horizontal, 24)
 
                     Spacer(minLength: 12)
 
-                    // 5. Centered 5-Button Control Cluster
                     controlsSection
                         .padding(.horizontal, 24)
 
                     Spacer(minLength: 12)
 
-                    // 6. Volume & Queue Bar
                     bottomBarSection
                         .padding(.horizontal, 24)
                         .padding(.bottom, 20)
@@ -202,7 +196,7 @@ struct FullPlayerView: View {
         VStack(spacing: 6) {
             // Scrubber View (36pt height)
             Group {
-                if !waveformSamples.isEmpty {
+                if settings.showWaveform && !waveformSamples.isEmpty {
                     WaveformScrubber(
                         samples: waveformSamples,
                         progress: Binding(

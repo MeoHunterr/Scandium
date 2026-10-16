@@ -110,6 +110,54 @@ final class SoundCloudAPI: ObservableObject {
         )
     }
 
+    /// Fetches the authenticated user's liked tracks via /me/likes/tracks
+    func getMeLikesTracks(oauthToken: String, limit: Int = 50) async throws -> [Track] {
+        let clientID = try await scraper.getClientID()
+        let urlString = "\(Self.baseURL)/me/likes/tracks?client_id=\(clientID)&limit=\(limit)"
+        let headers = ["Authorization": "OAuth \(oauthToken)"]
+
+        let data = try await performRawRequest(urlString: urlString, headers: headers)
+        if let direct = try? JSONDecoder().decode(SearchResponse.self, from: data) {
+            return direct.collection
+        }
+
+        struct LikeWrapper: Codable {
+            let track: Track?
+        }
+        struct LikesResponse: Codable {
+            let collection: [LikeWrapper]
+        }
+        if let wrapped = try? JSONDecoder().decode(LikesResponse.self, from: data) {
+            return wrapped.collection.compactMap { $0.track }
+        }
+
+        if let tracks = try? JSONDecoder().decode([Track].self, from: data) {
+            return tracks
+        }
+
+        return []
+    }
+
+    /// Fetches the authenticated user's playlists via /me/playlists
+    func getMePlaylists(oauthToken: String, limit: Int = 30) async throws -> [SoundCloudPlaylist] {
+        let clientID = try await scraper.getClientID()
+        let urlString = "\(Self.baseURL)/me/playlists?client_id=\(clientID)&limit=\(limit)"
+        let headers = ["Authorization": "OAuth \(oauthToken)"]
+
+        struct PlaylistCollection: Codable {
+            let collection: [SoundCloudPlaylist]
+        }
+
+        let data = try await performRawRequest(urlString: urlString, headers: headers)
+        if let col = try? JSONDecoder().decode(PlaylistCollection.self, from: data) {
+            return col.collection
+        }
+        if let arr = try? JSONDecoder().decode([SoundCloudPlaylist].self, from: data) {
+            return arr
+        }
+        return []
+    }
+
     /// Fetches a user's liked tracks
     func getUserLikes(userID: Int, oauthToken: String? = nil, limit: Int = 50) async throws -> [Track] {
         let clientID = try await scraper.getClientID()
