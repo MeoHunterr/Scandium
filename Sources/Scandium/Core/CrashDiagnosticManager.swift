@@ -5,6 +5,11 @@
 // ScandiumApp reads this file on next launch to show a Safe Mode / Crash Report screen.
 
 import Foundation
+import Darwin
+
+// MARK: - File-global crash log FD (must be outside the class, async-signal-safe access)
+
+private var crashLogFD: Int32 = -1
 
 // MARK: - Crash Diagnostic Manager
 
@@ -14,14 +19,48 @@ final class CrashDiagnosticManager {
 
     private let launchFlagKey = "scandium_is_launching"
     private let crashFileName = "last_crash.txt"
+    private let previousCrashFileName = "previous_crash.txt"
+
+    /// Cached crash log from the previous session (preserved before last_crash.txt is truncated)
+    private var previousCrashLog: String?
 
     private init() {}
 
     // MARK: - Public API
 
     /// Call once at the very start of app launch (before any heavy work).
-    /// Installs signal handlers and exception handler.
+    /// Preserves any crash log from the previous session, opens crash log FD (safe context),
+    /// then installs signal and exception handlers.
     func install() {
+        let dirs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+        if let url = dirs.first?.appendingPathComponent(crashFileName) {
+            let path = url.path
+            let fm = FileManager.default
+
+            // Preserve old crash log if it exists and has content before truncating
+            if fm.fileExists(atPath: path) {
+                if let attrs = try? fm.attributesOfItem(atPath: path),
+                   let size = attrs[.size] as? UInt64, size > 0 {
+                    if let content = try? String(contentsOf: url, encoding: .utf8),
+                       !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        self.previousCrashLog = content
+                        if let prevURL = dirs.first?.appendingPathComponent(previousCrashFileName) {
+                            try? fm.removeItem(at: prevURL)
+                            try? fm.copyItem(at: url, to: prevURL)
+                        }
+                    }
+                }
+            }
+
+            if crashLogFD >= 0 {
+                Darwin.close(crashLogFD)
+                crashLogFD = -1
+            }
+
+            crashLogFD = path.withCString { cPath in
+                Darwin.open(cPath, O_WRONLY | O_CREAT | O_TRUNC, 0o644 as mode_t)
+            }
+        }
         installSignalHandlers()
         installExceptionHandler()
     }
@@ -38,9 +77,16 @@ final class CrashDiagnosticManager {
 
     /// Returns true if a crash log from the previous session exists.
     var hasPreviousCrash: Bool {
-        let url = crashLogURL
-        guard let url = url else { return false }
-        return FileManager.default.fileExists(atPath: url.path)
+        if let log = previousCrashLog, !log.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        let dirs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+        if let prevURL = dirs.first?.appendingPathComponent(previousCrashFileName),
+           let content = try? String(contentsOf: prevURL, encoding: .utf8),
+           !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        return false
     }
 
     /// Returns true only if an actual crash log file was written by signal or exception handlers.
@@ -50,17 +96,46 @@ final class CrashDiagnosticManager {
 
     /// Reads the crash log content for display in Safe Mode UI.
     func readCrashLog() -> String {
+        if let log = previousCrashLog, !log.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return log
+        }
+        let dirs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+        if let prevURL = dirs.first?.appendingPathComponent(previousCrashFileName),
+           let content = try? String(contentsOf: prevURL, encoding: .utf8),
+           !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return content
+        }
         guard let url = crashLogURL,
-              let content = try? String(contentsOf: url, encoding: .utf8) else {
+              let content = try? String(contentsOf: url, encoding: .utf8),
+              !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return AppSettings.shared.loc("Không có log crash.", "No crash logs available.")
         }
         return content
     }
 
+    /// Reads the crash log content (alias for readCrashLog)
+    func readLastCrashLog() -> String {
+        return readCrashLog()
+    }
+
     /// Deletes the crash log file.
     func deleteCrashLog() {
+        previousCrashLog = nil
+        let dirs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+        if let dir = dirs.first {
+            let prevURL = dir.appendingPathComponent(previousCrashFileName)
+            try? FileManager.default.removeItem(at: prevURL)
+        }
         guard let url = crashLogURL else { return }
+        if crashLogFD >= 0 {
+            Darwin.close(crashLogFD)
+            crashLogFD = -1
+        }
         try? FileManager.default.removeItem(at: url)
+        let path = url.path
+        crashLogFD = path.withCString { cPath in
+            Darwin.open(cPath, O_WRONLY | O_CREAT | O_TRUNC, 0o644 as mode_t)
+        }
     }
 
     /// Resets all state: deletes crash log, clears launch flag.
@@ -88,7 +163,7 @@ final class CrashDiagnosticManager {
         return dirs.first?.appendingPathComponent(crashFileName)
     }
 
-    // MARK: - Internal: Write Crash Info
+    // MARK: - Internal: Write Crash Info (Foundation-safe — only used in ObjC exception handler)
 
     fileprivate static func writeCrashInfo(_ message: String) {
         let timestamp = ISO8601DateFormatter().string(from: Date())
@@ -114,22 +189,25 @@ final class CrashDiagnosticManager {
     // MARK: - Signal Handlers
 
     private func installSignalHandlers() {
-        let handler: @convention(c) (Int32) -> Void = { signal in
-            let name: String
-            switch signal {
-            case SIGABRT:  name = "SIGABRT (Abort)"
-            case SIGILL:   name = "SIGILL (Illegal Instruction)"
-            case SIGSEGV:  name = "SIGSEGV (Segmentation Fault)"
-            case SIGFPE:   name = "SIGFPE (Floating Point Exception)"
-            case SIGBUS:   name = "SIGBUS (Bus Error)"
-            case SIGPIPE:  name = "SIGPIPE (Broken Pipe)"
-            case SIGTRAP:  name = "SIGTRAP (Trace/Breakpoint Trap)"
-            default:       name = "Signal \(signal)"
+        // Pure C-compatible async-signal-safe handler
+        // ONLY uses: write(), backtrace(), backtrace_symbols_fd(), fsync()
+        // Does NOT call Swift/Foundation heap-allocating APIs
+        let handler: @convention(c) (Int32) -> Void = { sig in
+            if crashLogFD >= 0 {
+                // Write a minimal ASCII header using write() — async-signal-safe
+                let header = "=== SCANDIUM CRASH SIGNAL ===\n"
+                header.withCString { ptr in
+                    _ = Darwin.write(crashLogFD, ptr, strlen(ptr))
+                }
+                // Dump backtrace directly to FD — async-signal-safe
+                var frames = [UnsafeMutableRawPointer?](repeating: nil, count: 64)
+                let count = backtrace(&frames, 64)
+                backtrace_symbols_fd(&frames, count, crashLogFD)
+                _ = Darwin.fsync(crashLogFD)
             }
-            CrashDiagnosticManager.writeCrashInfo("Fatal Signal: \(name)")
-            // Re-raise so the system can generate a proper crash report
-            Foundation.signal(signal, SIG_DFL)
-            raise(signal)
+            // Reset to default handler and re-raise so system generates a proper crash report
+            Foundation.signal(sig, SIG_DFL)
+            raise(sig)
         }
 
         Foundation.signal(SIGABRT, handler)

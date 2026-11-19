@@ -15,6 +15,9 @@ final class StorageManager: ObservableObject {
 
     private init() {
         // Storage values start at 0; refreshUsage() is called lazily from ProfileView.onAppear
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.evictAudioTempIfNeeded()
+        }
     }
 
     // MARK: - Formatters
@@ -145,6 +148,38 @@ final class StorageManager: ObservableObject {
             }
         }
         refreshUsage()
+    }
+
+    /// Evicts oldest temp audio files using LRU when total exceeds 250 MB
+    func evictAudioTempIfNeeded() {
+        let maxBytes: Int64 = 250 * 1024 * 1024
+        let targetBytes: Int64 = Int64(Double(maxBytes) * 0.8)
+        DispatchQueue.global(qos: .background).async {
+            let fm = FileManager.default
+            let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            guard let files = try? fm.contentsOfDirectory(
+                at: tmpURL,
+                includingPropertiesForKeys: [.fileSizeKey, .contentAccessDateKey],
+                options: .skipsHiddenFiles
+            ) else { return }
+            var totalSize: Int64 = 0
+            var fileInfos: [(url: URL, size: Int64, accessDate: Date)] = []
+            for fileURL in files {
+                guard let attrs = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentAccessDateKey]),
+                      let size = attrs.fileSize,
+                      let accessDate = attrs.contentAccessDate else { continue }
+                let s = Int64(size)
+                totalSize += s
+                fileInfos.append((url: fileURL, size: s, accessDate: accessDate))
+            }
+            guard totalSize > maxBytes else { return }
+            fileInfos.sort { $0.accessDate < $1.accessDate }
+            for info in fileInfos {
+                guard totalSize > targetBytes else { break }
+                try? fm.removeItem(at: info.url)
+                totalSize -= info.size
+            }
+        }
     }
 
     // MARK: - Private Helpers

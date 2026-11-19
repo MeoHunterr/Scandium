@@ -2,6 +2,8 @@
 // Project: Scandium | Author: MeoHunter | License: GPL-3.0
 
 import SwiftUI
+import CoreImage
+import CoreImage.CIFilterBuiltins
 
 // MARK: - Design Tokens
 
@@ -99,12 +101,16 @@ struct SpecularBorderGradient: View {
     }
 }
 
-// MARK: - Ambient Canvas Background (True OLED Black + Subtle Soft Artwork Glow)
+// MARK: - Ambient Canvas Background (GPU-Optimized: pre-blurred via CoreImage on background thread)
+
+// File-scope blur cache (concurrent dictionary protected by barrier writes)
+private var blurredArtworkCache = [String: UIImage]()
+private let blurCacheQueue = DispatchQueue(label: "com.scandium.blurCache", attributes: .concurrent)
 
 struct AmbientCanvasBackground: View {
     let artworkURL: URL?
     @ObservedObject private var settings = AppSettings.shared
-    @State private var loadedImage: UIImage?
+    @State private var blurredImage: UIImage?
 
     init(artworkURL: URL? = nil) {
         self.artworkURL = artworkURL
@@ -116,18 +122,13 @@ struct AmbientCanvasBackground: View {
             let h = max(1, geo.size.height)
 
             ZStack {
-                // True OLED Black base
                 ScandiumTheme.bgPrimary
-
-                // Subtle, non-intrusive soft glow from artwork when playing.
-                // Fixed dimensions and strictly clipped to prevent expanding parent containers.
-                if let image = loadedImage {
+                if let image = blurredImage {
                     Image(uiImage: image)
                         .resizable()
                         .frame(width: w, height: h)
                         .clipped()
-                        .blur(radius: 60)
-                        .opacity(0.18)
+                        .opacity(0.35)
                 }
             }
             .frame(width: w, height: h)
@@ -136,44 +137,60 @@ struct AmbientCanvasBackground: View {
         }
         .allowsHitTesting(false)
         .ignoresSafeArea()
-        .onAppear {
-            loadArtwork(artworkURL)
+        .onAppear { loadBlurredArtwork(artworkURL) }
+        .onChange(of: artworkURL?.absoluteString) { _ in loadBlurredArtwork(artworkURL) }
+    }
+
+    private func loadBlurredArtwork(_ url: URL?) {
+        guard let url = url else {
+            withAnimation(.easeOut(duration: 0.3)) { self.blurredImage = nil }
+            return
         }
-        .onChange(of: artworkURL?.absoluteString) { _ in
-            loadArtwork(artworkURL)
+        let key = url.absoluteString
+        // Check blur cache first (barrier-free read)
+        blurCacheQueue.async {
+            var cached: UIImage?
+            blurCacheQueue.sync { cached = blurredArtworkCache[key] }
+            if let cached = cached {
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.35)) { self.blurredImage = cached }
+                }
+                return
+            }
+            // Not cached: download and blur on background thread
+            guard let data = try? Data(contentsOf: url),
+                  let source = UIImage(data: data) else { return }
+            let blurred = Self.createBlurredImage(from: source)
+            if let blurred = blurred {
+                blurCacheQueue.async(flags: .barrier) {
+                    blurredArtworkCache[key] = blurred
+                }
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.35)) { self.blurredImage = blurred }
+                }
+            }
         }
     }
 
-    private func loadArtwork(_ url: URL?) {
-        guard let url = url else {
-            withAnimation(.easeOut(duration: 0.3)) {
-                self.loadedImage = nil
-            }
-            return
-        }
+    // Uses CoreImage CIGaussianBlur — runs on background thread, GPU-accelerated
+    private static func createBlurredImage(from source: UIImage) -> UIImage? {
+        // Downsample to 48×48 before blurring for GPU efficiency
+        let targetSize = CGSize(width: 48, height: 48)
+        UIGraphicsBeginImageContextWithOptions(targetSize, false, 1.0)
+        source.draw(in: CGRect(origin: .zero, size: targetSize))
+        let small = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        guard let smallImage = small,
+              let cgImage = smallImage.cgImage else { return nil }
 
-        if let cached = ImageCacheStore.shared.get(for: url) {
-            withAnimation(.easeInOut(duration: 0.35)) {
-                self.loadedImage = cached
-            }
-            return
-        }
-
-        Task {
-            do {
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let image = UIImage(data: data) {
-                    ImageCacheStore.shared.set(image, for: url)
-                    await MainActor.run {
-                        withAnimation(.easeInOut(duration: 0.35)) {
-                            self.loadedImage = image
-                        }
-                    }
-                }
-            } catch {
-                // Silently fallback to pure black
-            }
-        }
+        let ciImage = CIImage(cgImage: cgImage)
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        guard let blurFilter = CIFilter(name: "CIGaussianBlur") else { return nil }
+        blurFilter.setValue(ciImage, forKey: kCIInputImageKey)
+        blurFilter.setValue(12.0, forKey: kCIInputRadiusKey)
+        guard let outputImage = blurFilter.outputImage,
+              let cgOutput = context.createCGImage(outputImage, from: ciImage.extent) else { return nil }
+        return UIImage(cgImage: cgOutput)
     }
 }
 
@@ -362,6 +379,48 @@ final class ImageCacheStore {
             let fileURL = dir.appendingPathComponent(diskKey(for: url))
             DispatchQueue.global(qos: .utility).async {
                 try? data.write(to: fileURL, options: .atomic)
+            }
+        }
+        evictIfNeeded()
+    }
+
+    // MARK: - LRU Disk Cache Eviction
+
+    private static let maxDiskCacheBytes: Int64 = 250 * 1024 * 1024 // 250 MB
+    private static let targetDiskCacheBytes: Int64 = Int64(Double(maxDiskCacheBytes) * 0.8) // 200 MB
+
+    func evictIfNeeded() {
+        guard let dir = diskCacheDir else { return }
+        DispatchQueue.global(qos: .background).async {
+            let fm = FileManager.default
+            guard let files = try? fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.fileSizeKey, .contentAccessDateKey],
+                options: .skipsHiddenFiles
+            ) else { return }
+
+            // Calculate total size
+            var totalSize: Int64 = 0
+            var fileInfos: [(url: URL, size: Int64, accessDate: Date)] = []
+            for fileURL in files {
+                guard let attrs = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentAccessDateKey]),
+                      let size = attrs.fileSize,
+                      let accessDate = attrs.contentAccessDate else { continue }
+                let s = Int64(size)
+                totalSize += s
+                fileInfos.append((url: fileURL, size: s, accessDate: accessDate))
+            }
+
+            guard totalSize > ImageCacheStore.maxDiskCacheBytes else { return }
+
+            // Sort by access date ascending (oldest first = LRU eviction order)
+            fileInfos.sort { $0.accessDate < $1.accessDate }
+
+            // Evict until below 80% threshold
+            for info in fileInfos {
+                guard totalSize > ImageCacheStore.targetDiskCacheBytes else { break }
+                try? fm.removeItem(at: info.url)
+                totalSize -= info.size
             }
         }
     }

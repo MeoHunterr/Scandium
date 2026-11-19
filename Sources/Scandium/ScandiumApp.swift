@@ -93,6 +93,9 @@ struct ScandiumApp: App {
             isUIReady = true
         }
         CrashDiagnosticManager.shared.markLaunchSucceeded()
+        DispatchQueue.global(qos: .utility).async {
+            StorageManager.shared.evictAudioTempIfNeeded()
+        }
     }
 
     private func configureAppearance() {

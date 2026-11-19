@@ -1,4 +1,4 @@
-// ClientIDScraper.swift — Dynamic client_id extraction with multi-tier fallback
+// ClientIDScraper.swift — Dynamic client_id extraction with multi-tier scraping
 // Project: Scandium | Author: MeoHunter | License: GPL-3.0
 
 import Foundation
@@ -11,10 +11,10 @@ final class ClientIDScraper: ObservableObject {
         case ready
         case manual
         case cached
-        case fallback
         case syncing
         case online
         case fallbackError
+        case noClientID
     }
 
     @Published private(set) var clientID: String?
@@ -25,13 +25,13 @@ final class ClientIDScraper: ObservableObject {
     var statusDescription: String {
         let isEn = AppSettings.shared.language == .english
         switch status {
-        case .ready: return isEn ? "Ready" : "Sẵn sàng"
-        case .manual: return isEn ? "Manual" : "Thủ công"
-        case .cached: return isEn ? "Cached" : "Đã lưu đệm"
-        case .fallback: return isEn ? "Fallback" : "Dự phòng"
-        case .syncing: return isEn ? "Syncing..." : "Đang làm mới..."
-        case .online: return isEn ? "Online" : "Trực tuyến"
+        case .ready:        return isEn ? "Ready" : "Sẵn sàng"
+        case .manual:       return isEn ? "Manual" : "Thủ công"
+        case .cached:       return isEn ? "Cached" : "Đã lưu đệm"
+        case .syncing:      return isEn ? "Syncing..." : "Đang làm mới..."
+        case .online:       return isEn ? "Online" : "Trực tuyến"
         case .fallbackError: return isEn ? "Fallback (Error)" : "Dự phòng (Lỗi)"
+        case .noClientID:   return isEn ? "No Client ID" : "Chưa có Client ID"
         }
     }
 
@@ -39,7 +39,7 @@ final class ClientIDScraper: ObservableObject {
         clientID
     }
 
-    // MARK: - Constants & Fallbacks
+    // MARK: - Constants
 
     private static let cacheKey = "scandium_client_id"
     private static let cacheTimestampKey = "scandium_client_id_timestamp"
@@ -51,15 +51,6 @@ final class ClientIDScraper: ObservableObject {
     private static let scrapeEndpoints = [
         "https://soundcloud.com",
         "https://soundcloud.com/discover"
-    ]
-
-    /// Built-in fallback Client IDs verified for SoundCloud API v2
-    static let fallbackClientIDs: [String] = [
-        "A0cxVCVBD6HAZsm0P3nxKaPaZtrGqkXN",
-        "2t9loNfh0ekOfkJmyJEE9dnjy02RW2EC",
-        "a3e059563d7fd3372b49b37f00a00bcf",
-        "iZIs9mchVcX5lhVR1EzGCJqqnegPWvd7",
-        "bIjQvHau4n9iEw3iVjGZkVw5Z2t4Gk3A"
     ]
 
     private static let desktopUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
@@ -74,7 +65,7 @@ final class ClientIDScraper: ObservableObject {
 
     init(session: URLSession = .shared) {
         self.session = session
-        // Priority: Manual override -> Cached ID -> First fallback ID
+        // Priority: Manual override -> Cached ID -> nil (no fallback IDs)
         if let manual = Self.loadManualClientID() {
             self.clientID = manual
             self.status = .manual
@@ -82,17 +73,15 @@ final class ClientIDScraper: ObservableObject {
             self.clientID = cached
             self.status = .cached
         } else {
-            let fallback = Self.fallbackClientIDs.first ?? "A0cxVCVBD6HAZsm0P3nxKaPaZtrGqkXN"
-            Self.cacheClientID(fallback)
-            self.clientID = fallback
-            self.status = .fallback
+            // No manual override and no valid cache — start with nil, will scrape on demand
+            self.clientID = nil
+            self.status = .ready
         }
     }
 
     // MARK: - Public API
 
-    /// Returns a valid client_id immediately, using manual/cache/fallback first,
-    /// and asynchronously refreshing in the background to prevent blocking UI requests.
+    /// Returns a valid client_id using manual/cache first. If nil, triggers a fresh scrape.
     @discardableResult
     func getClientID() async throws -> String {
         if let manual = Self.loadManualClientID() {
@@ -111,17 +100,11 @@ final class ClientIDScraper: ObservableObject {
             return cached
         }
 
-        if let current = clientID ?? Self.fallbackClientIDs.first {
-            Task { [weak self] in
-                _ = try? await self?.refreshClientID()
-            }
-            return current
-        }
-
+        // No manual override, no valid cache — must scrape
         return try await refreshClientID()
     }
 
-    /// Forces a fresh scrape across all endpoints, falling back to built-in list.
+    /// Forces a fresh scrape across all endpoints. Throws on failure (no hardcoded fallback IDs).
     @discardableResult
     func refreshClientID() async throws -> String {
         if let manual = Self.loadManualClientID() {
@@ -156,16 +139,14 @@ final class ClientIDScraper: ObservableObject {
                 }
                 return id
             } catch {
-                // If scraping fails completely, use the first built-in fallback ID
-                let fallback = Self.fallbackClientIDs.first ?? "A0cxVCVBD6HAZsm0P3nxKaPaZtrGqkXN"
-                Self.cacheClientID(fallback)
+                // Scraping failed completely — no hardcoded fallbacks, surface the error
                 await MainActor.run {
-                    self.clientID = fallback
+                    self.clientID = nil
                     self.isLoading = false
                     self.lastError = error.localizedDescription
-                    self.status = .fallbackError
+                    self.status = .noClientID
                 }
-                return fallback
+                throw error
             }
         }
 
@@ -188,8 +169,9 @@ final class ClientIDScraper: ObservableObject {
                 self.clientID = cached
                 self.status = .cached
             } else {
-                self.clientID = Self.fallbackClientIDs.first
-                self.status = .fallback
+                // No cache — no hardcoded fallback
+                self.clientID = nil
+                self.status = .noClientID
             }
         }
     }
@@ -202,13 +184,13 @@ final class ClientIDScraper: ObservableObject {
         Self.loadManualClientID() != nil
     }
 
-    /// Clears cached client_id, forcing re-scrape.
+    /// Clears cached client_id, forcing re-scrape on next request.
     func clearCache() {
         UserDefaults.standard.removeObject(forKey: Self.cacheKey)
         UserDefaults.standard.removeObject(forKey: Self.cacheTimestampKey)
         if !isManualOverride {
-            self.clientID = Self.fallbackClientIDs.first
-            self.status = .fallback
+            self.clientID = nil
+            self.status = .ready
         }
     }
 
@@ -227,13 +209,6 @@ final class ClientIDScraper: ObservableObject {
             }
         }
 
-        // Try verifying our built-in fallback IDs directly against API
-        for candidate in Self.fallbackClientIDs {
-            if await verifyClientID(candidate) {
-                return candidate
-            }
-        }
-
         throw ScraperError.allEndpointsFailed(collectedErrors.joined(separator: " | "))
     }
 
@@ -245,8 +220,8 @@ final class ClientIDScraper: ObservableObject {
             throw ScraperError.noScriptsFound
         }
 
-        // Fetch the last 4 JS bundle files in reverse order (assets with client_id are at the end)
-        let bundlesToFetch = Array(scriptURLs.suffix(4).reversed())
+        // Fetch the last 8 JS bundle files in reverse order (broader scanning)
+        let bundlesToFetch = Array(scriptURLs.suffix(8).reversed())
         let clientID = try await fetchAndExtractFromBundles(bundlesToFetch)
         return clientID
     }
