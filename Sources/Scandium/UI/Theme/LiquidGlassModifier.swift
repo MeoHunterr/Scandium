@@ -147,21 +147,23 @@ struct AmbientCanvasBackground: View {
             return
         }
         let key = url.absoluteString
-        // Check blur cache first (barrier-free read)
-        blurCacheQueue.async {
-            var cached: UIImage?
-            blurCacheQueue.sync { cached = blurredArtworkCache[key] }
-            if let cached = cached {
-                DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.35)) { self.blurredImage = cached }
-                }
-                return
+
+        // 1. Check blur cache first (thread-safe synchronous read)
+        var cached: UIImage?
+        blurCacheQueue.sync {
+            cached = blurredArtworkCache[key]
+        }
+        if let cached = cached {
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 0.35)) { self.blurredImage = cached }
             }
-            // Not cached: download and blur on background thread
-            guard let data = try? Data(contentsOf: url),
-                  let source = UIImage(data: data) else { return }
-            let blurred = Self.createBlurredImage(from: source)
-            if let blurred = blurred {
+            return
+        }
+
+        // 2. Check if raw image already exists in ImageCacheStore
+        if let sourceImage = ImageCacheStore.shared.get(for: url) {
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let blurred = Self.createBlurredImage(from: sourceImage) else { return }
                 blurCacheQueue.async(flags: .barrier) {
                     blurredArtworkCache[key] = blurred
                 }
@@ -169,7 +171,28 @@ struct AmbientCanvasBackground: View {
                     withAnimation(.easeInOut(duration: 0.35)) { self.blurredImage = blurred }
                 }
             }
+            return
         }
+
+        // 3. Asynchronously download via URLSession (non-blocking)
+        var request = URLRequest(url: url)
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 10
+
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            guard let data = data, let source = UIImage(data: data) else { return }
+            ImageCacheStore.shared.set(source, for: url)
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let blurred = Self.createBlurredImage(from: source) else { return }
+                blurCacheQueue.async(flags: .barrier) {
+                    blurredArtworkCache[key] = blurred
+                }
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.35)) { self.blurredImage = blurred }
+                }
+            }
+        }.resume()
     }
 
     // Uses CoreImage CIGaussianBlur — runs on background thread, GPU-accelerated

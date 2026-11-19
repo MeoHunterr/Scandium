@@ -127,7 +127,7 @@ final class AudioPlayerEngine: ObservableObject {
     func play(track: Track) {
         setupIfNeeded()
 
-        DispatchQueue.main.async { [weak self] in
+        let updateState = { [weak self] in
             guard let self = self else { return }
             self.currentTrack = track
             self.playbackState = .loading
@@ -137,7 +137,14 @@ final class AudioPlayerEngine: ObservableObject {
             self.artworkImage = nil
         }
 
+        if Thread.isMainThread {
+            updateState()
+        } else {
+            DispatchQueue.main.async(execute: updateState)
+        }
+
         LibraryManager.shared.addToRecentlyPlayed(track: track)
+        fetchArtworkForNowPlaying(track: track)
 
         Task { [weak self] in
             guard let self = self else { return }
@@ -152,8 +159,6 @@ final class AudioPlayerEngine: ObservableObject {
                 }
             }
         }
-
-        fetchArtworkForNowPlaying(track: track)
     }
 
     /// Plays a track from the queue at a specific index.
@@ -537,31 +542,42 @@ final class AudioPlayerEngine: ObservableObject {
     // MARK: - Sleep Timer Engine
 
     func setSleepTimer(_ option: SleepTimerOption) {
-        AppSettings.shared.sleepTimerOption = option
-        sleepTimer?.invalidate()
-        sleepTimer = nil
+        let scheduleBlock = { [weak self] in
+            guard let self = self else { return }
+            AppSettings.shared.sleepTimerOption = option
+            self.sleepTimer?.invalidate()
+            self.sleepTimer = nil
 
-        switch option {
-        case .off, .endOfTrack:
-            sleepTimerRemainingSeconds = 0
-        case .min15, .min30, .min45, .min60:
-            let totalSeconds = option.rawValue * 60
-            sleepTimerRemainingSeconds = totalSeconds
-            sleepTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
-                guard let self = self else {
-                    timer.invalidate()
-                    return
+            switch option {
+            case .off, .endOfTrack:
+                self.sleepTimerRemainingSeconds = 0
+            case .min15, .min30, .min45, .min60:
+                let totalSeconds = option.rawValue * 60
+                self.sleepTimerRemainingSeconds = totalSeconds
+                let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] t in
+                    guard let self = self else {
+                        t.invalidate()
+                        return
+                    }
+                    if self.sleepTimerRemainingSeconds > 1 {
+                        self.sleepTimerRemainingSeconds -= 1
+                    } else {
+                        self.sleepTimerRemainingSeconds = 0
+                        t.invalidate()
+                        self.sleepTimer = nil
+                        AppSettings.shared.sleepTimerOption = .off
+                        self.pause()
+                    }
                 }
-                if self.sleepTimerRemainingSeconds > 1 {
-                    self.sleepTimerRemainingSeconds -= 1
-                } else {
-                    self.sleepTimerRemainingSeconds = 0
-                    timer.invalidate()
-                    self.sleepTimer = nil
-                    AppSettings.shared.sleepTimerOption = .off
-                    self.pause()
-                }
+                RunLoop.main.add(timer, forMode: .common)
+                self.sleepTimer = timer
             }
+        }
+
+        if Thread.isMainThread {
+            scheduleBlock()
+        } else {
+            DispatchQueue.main.async(execute: scheduleBlock)
         }
     }
 

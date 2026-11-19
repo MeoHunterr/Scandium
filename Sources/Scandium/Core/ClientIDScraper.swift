@@ -59,6 +59,7 @@ final class ClientIDScraper: ObservableObject {
     // MARK: - Private State
 
     private let session: URLSession
+    private let taskLock = NSLock()
     private var refreshTask: Task<String, Error>?
 
     // MARK: - Init
@@ -104,21 +105,12 @@ final class ClientIDScraper: ObservableObject {
         return try await refreshClientID()
     }
 
-    /// Forces a fresh scrape across all endpoints. Throws on failure (no hardcoded fallback IDs).
-    @discardableResult
-    func refreshClientID() async throws -> String {
-        if let manual = Self.loadManualClientID() {
-            await MainActor.run {
-                self.clientID = manual
-                self.status = .manual
-            }
-            return manual
-        }
-
+    private func getOrStartRefreshTask() -> Task<String, Error> {
+        taskLock.lock()
+        defer { taskLock.unlock() }
         if let existing = refreshTask {
-            return try await existing.value
+            return existing
         }
-
         let task = Task<String, Error> { [weak self] in
             guard let self = self else {
                 throw ScraperError.deallocated
@@ -149,9 +141,29 @@ final class ClientIDScraper: ObservableObject {
                 throw error
             }
         }
-
         self.refreshTask = task
-        defer { self.refreshTask = nil }
+        return task
+    }
+
+    private func clearRefreshTask() {
+        taskLock.lock()
+        defer { taskLock.unlock() }
+        self.refreshTask = nil
+    }
+
+    /// Forces a fresh scrape across all endpoints. Throws on failure (no hardcoded fallback IDs).
+    @discardableResult
+    func refreshClientID() async throws -> String {
+        if let manual = Self.loadManualClientID() {
+            await MainActor.run {
+                self.clientID = manual
+                self.status = .manual
+            }
+            return manual
+        }
+
+        let task = getOrStartRefreshTask()
+        defer { clearRefreshTask() }
 
         return try await task.value
     }

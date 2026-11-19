@@ -37,10 +37,10 @@ struct WaveformScrubber: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let totalWidth = geometry.size.width
-            let totalHeight = geometry.size.height
+            let totalWidth = max(1, geometry.size.width)
+            let totalHeight = max(1, geometry.size.height)
             let displaySamples = downsample(to: totalWidth)
-            let barWidth = max(1.5, (totalWidth - barSpacing * CGFloat(displaySamples.count - 1)) / CGFloat(displaySamples.count))
+            let barWidth = max(1.5, (totalWidth - barSpacing * CGFloat(displaySamples.count - 1)) / CGFloat(max(1, displaySamples.count)))
             let activeProgress = isDragging ? dragProgress : progress
 
             ZStack(alignment: .leading) {
@@ -64,12 +64,14 @@ struct WaveformScrubber: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        let fraction = max(0, min(1, Double(value.location.x / totalWidth)))
+                        guard totalWidth > 0 else { return }
+                        let fraction = max(0.0, min(1.0, Double(value.location.x / totalWidth)))
                         isDragging = true
                         dragProgress = fraction
                     }
                     .onEnded { value in
-                        let fraction = max(0, min(1, Double(value.location.x / totalWidth)))
+                        guard totalWidth > 0 else { return }
+                        let fraction = max(0.0, min(1.0, Double(value.location.x / totalWidth)))
                         isDragging = false
                         dragProgress = fraction
                         onSeek(fraction)

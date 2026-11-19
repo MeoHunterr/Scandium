@@ -160,16 +160,17 @@ final class LibraryManager: ObservableObject {
     func like(track: Track) {
         guard !isLiked(track: track) else { return }
         likedTracks.insert(track, at: 0)
-        // Renumber positions
-        dbQueue.async { self._insertLikedTracks(self.likedTracks) }
+        let snapshot = likedTracks
+        dbQueue.async { self._insertLikedTracks(snapshot) }
     }
 
     func unlike(track: Track) {
         likedTracks.removeAll(where: { $0.id == track.id })
+        let remaining = likedTracks
         dbQueue.async {
             self._deleteTrack(id: track.id, table: "liked_tracks")
             // Re-index remaining positions
-            for (pos, t) in self.likedTracks.enumerated() {
+            for (pos, t) in remaining.enumerated() {
                 self._updatePosition(id: t.id, position: pos, table: "liked_tracks")
             }
         }
@@ -190,14 +191,16 @@ final class LibraryManager: ObservableObject {
             }
         }
         if changed {
-            dbQueue.async { self._insertLikedTracks(self.likedTracks) }
+            let snapshot = self.likedTracks
+            dbQueue.async { self._insertLikedTracks(snapshot) }
         }
     }
 
     /// Synchronizes user playlists from SoundCloud account
     func syncUserPlaylists(_ playlists: [SoundCloudPlaylist]) {
         self.userPlaylists = playlists
-        dbQueue.async { self._insertPlaylists(playlists) }
+        let snapshot = playlists
+        dbQueue.async { self._insertPlaylists(snapshot) }
     }
 
     // MARK: - Recently Played API
@@ -239,8 +242,14 @@ final class LibraryManager: ObservableObject {
 
     // MARK: - Private SQLite Helpers (run on dbQueue)
 
+    private static let validTables: Set<String> = ["liked_tracks", "recently_played", "playlists"]
+
+    private func _isValidTable(_ table: String) -> Bool {
+        Self.validTables.contains(table)
+    }
+
     private func _queryTracks(table: String) -> [Track] {
-        guard let db = db else { return [] }
+        guard let db = db, _isValidTable(table) else { return [] }
         var results: [Track] = []
         var stmt: OpaquePointer?
         let sql = "SELECT json_data FROM \(table) ORDER BY position ASC;"
@@ -346,7 +355,7 @@ final class LibraryManager: ObservableObject {
     }
 
     private func _deleteTrack(id: Int, table: String) {
-        guard let db = db else { return }
+        guard let db = db, _isValidTable(table) else { return }
         var stmt: OpaquePointer?
         let sql = "DELETE FROM \(table) WHERE id = ?;"
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
@@ -357,7 +366,7 @@ final class LibraryManager: ObservableObject {
     }
 
     private func _updatePosition(id: Int, position: Int, table: String) {
-        guard let db = db else { return }
+        guard let db = db, _isValidTable(table) else { return }
         var stmt: OpaquePointer?
         let sql = "UPDATE \(table) SET position = ? WHERE id = ?;"
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
@@ -369,7 +378,7 @@ final class LibraryManager: ObservableObject {
     }
 
     private func _deleteAll(table: String) {
-        guard let db = db else { return }
+        guard let db = db, _isValidTable(table) else { return }
         sqlite3_exec(db, "DELETE FROM \(table);", nil, nil, nil)
     }
 }
