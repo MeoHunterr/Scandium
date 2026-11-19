@@ -1,0 +1,11 @@
+theme: jekyll-theme-cayman
+exclude:
+  - Sources
+  - Tests
+  - scripts
+  - .bsp
+  - .github
+  - Package.swift
+  - Info.plist
+  - entitlements.plist
+  - xtool.yml
