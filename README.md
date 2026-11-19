@@ -1,3 +1,4 @@
+<meta name="google-site-verification" content="g_vctH-gmexU5uED5zusBBbLfsFcWf1QmGBe_U6ClXk" />
 # Scandium
 
 ![iOS 15.0+](https://img.shields.io/badge/iOS-15.0%2B-000000) ![License](https://img.shields.io/badge/license-GPL--3.0-000000)
