@@ -13,15 +13,16 @@
 4. [Bộ Quy tắc Lập trình SwiftUI An toàn cho iOS 15.0+](#4-bộ-quy-tắc-lập-trình-swiftui-an-toàn-cho-ios-150)
 5. [Kiến trúc Chi tiết các Module Cốt lõi (Core Engine)](#5-kiến-trúc-chi-tiết-các-module-cốt-lõi-core-engine)
    - [5.1. ScandiumApp & Quy trình Khởi chạy An toàn (Staged Launch)](#51-scandiumapp--quy-trình-khởi-chạy-an-toàn-staged-launch)
-   - [5.2. CrashDiagnosticManager — Hệ thống Bắt lỗi Fatal C-Signal](#52-crashdiagnosticmanager--hệ-thống-bắt-lỗi-fatal-c-signal)
-   - [5.3. ClientIDScraper — Cơ chế Cào Client ID Động & Đa tầng Dự phòng](#53-clientidscraper--cơ-chế-cào-client-id-động--đa-tầng-dự-phòng)
+   - [5.2. CrashDiagnosticManager — Bẫy Lỗi Fatal C-Signal Chuẩn Async-Signal-Safe](#52-crashdiagnosticmanager--bẫy-lỗi-fatal-c-signal-chuẩn-async-signal-safe)
+   - [5.3. ClientIDScraper — Cơ chế Cào Client ID Động & FOSS Tuyệt Đối](#53-clientidscraper--cơ-chế-cào-client-id-động--foss-tuyệt-đối)
    - [5.4. SoundCloudAPI — Tầng Mạng API v2 & Phân giải Luồng Stream](#54-soundcloudapi--tầng-mạng-api-v2--phân-giải-luồng-stream)
    - [5.5. AudioPlayerEngine — Động cơ Phát nhạc Nền & Tích hợp Hệ thống](#55-audioplayerengine--động-cơ-phát-nhạc-nền--tích-hợp-hệ-thống)
    - [5.6. SoundCloudAuthManager & KeychainHelper — Quản lý Danh tính & Bảo mật](#56-soundcloudauthmanager--keychainhelper--quản-lý-danh-tính--bảo-mật)
-   - [5.7. LibraryManager & StorageManager — Quản lý Thư viện & Bộ nhớ Đệm](#57-librarymanager--storagemanager--quản-lý-thư-viện--bộ-nhớ-đệm)
-   - [5.8. AppSettings — Hệ thống Tùy biến & Quản lý Alternate Icon](#58-appsettings--hệ-thống-tùy-biến--quản-lý-alternate-icon)
-6. [Hệ thống Thiết kế Giao diện (Design System: Liquid Glass & Threads Flat)](#6-hệ-thống-thiết-kế-giao-diện-design-system-liquid-glass--threads-flat)
-7. [Quy trình Đóng gói Tự động hoá & Kiểm toán Tiền Biên dịch (CI/CD Pipeline)](#7-quy-trình-đóng-gói-tự-động-hoá--kiểm-toán-tiền-biên-dịch-cicd-pipeline)
+   - [5.7. LibraryManager — Cơ sở Dữ liệu Bản địa SQLite3 & Migration](#57-librarymanager--cơ-sở-dữ-liệu-bản-địa-sqlite3--migration)
+   - [5.8. StorageManager — Thống kê & Cơ chế Dọn dẹp Bộ nhớ Đệm LRU Tự động](#58-storagemanager--thống-kê--cơ-chế-dọn-dẹp-bộ-nhớ-đệm-lru-tự-động)
+   - [5.9. AppSettings — Hệ thống Tùy biến & Quản lý Alternate Icon](#59-appsettings--hệ-thống-tùy-biến--quản-lý-alternate-icon)
+6. [Hệ thống Thiết kế Giao diện & Tối ưu GPU CoreImage](#6-hệ-thống-thiết-kế-giao-diện--tối-ưu-gpu-coreimage)
+7. [Quy trình Đóng gói Tự động hoá & Kiểm toán Tiền Biên dịch (Auditing)](#7-quy-trình-đóng-gói-tự-động-hoá--kiểm-toán-tiền-biên-dịch-auditing)
 8. [Cấu trúc Cây Thư mục Dự án](#8-cấu-trúc-cây-thư-mục-dự-án)
 9. [Tuân thủ Pháp lý & Giới hạn Bản quyền FOSS](#9-tuân-thủ-pháp-lý--giới-hạn-bản-quyền-foss)
 
@@ -29,16 +30,16 @@
 
 ## 1. Giới thiệu Tổng quan & Sứ mệnh Dự án
 
-**Scandium** (biểu tượng hóa học `[21 Sc]`) là ứng dụng nghe nhạc trực tuyến SoundCloud nguyên bản (Native iOS Client), mã nguồn mở, độc lập và siêu nhẹ, được viết hoàn toàn bằng **Swift** và **SwiftUI**. 
+**Scandium** (ký hiệu hóa học `[21 Sc]`) là ứng dụng nghe nhạc SoundCloud nguyên bản (Native iOS Client), mã nguồn mở, độc lập và siêu nhẹ, được viết 100% bằng **Swift** và **SwiftUI**.
 
 ### Bối cảnh & Sứ mệnh
-Ứng dụng SoundCloud chính thức đã ngừng hỗ trợ các phiên bản hệ điều hành cũ (iOS 15 và iOS 16), biến hàng triệu thiết bị phần cứng vẫn còn hoạt động tốt (như iPhone 6s, 6s Plus, iPhone 7, 7 Plus, iPhone SE Gen 1, iPhone 8, 8 Plus, iPhone X và các dòng iPad tương ứng) thành những thiết bị không thể nghe nhạc SoundCloud một cách mượt mà nếu không dùng trình duyệt web nặng nề.
+Ứng dụng SoundCloud chính thức đã ngừng hỗ trợ các phiên bản hệ điều hành cũ (iOS 15 và iOS 16), biến hàng triệu thiết bị phần cứng vẫn còn hoạt động tốt (như iPhone 6s/6s Plus, iPhone 7/7 Plus, iPhone SE Gen 1, iPhone 8/8 Plus, iPhone X và các dòng iPad thế hệ cũ) thành những thiết bị không thể nghe nhạc SoundCloud một cách mượt mà nếu không dùng trình duyệt web nặng nề.
 
-Scandium được tạo ra nhằm giải quyết triệt để vấn đề này:
-- **Tương thích tuyệt đối xuống tới iOS 15.0:** Hoạt động ổn định trên cả thiết bị legacy (A9–A11 chip) và các thiết bị hiện đại chạy iOS 17/18+.
-- **Pure Native Audio Streaming:** Sử dụng trực tiếp `AVFoundation` và `AVPlayer`, không sử dụng Web Wrapper, không nhúng WebView để phát nhạc, tiết kiệm tối đa RAM và thời lượng pin.
+Scandium được thiết kế nhằm giải quyết triệt để vấn đề này:
+- **Tương thích tuyệt đối xuống tới iOS 15.0:** Hoạt động ổn định trên cả thiết bị legacy (chip Apple A9–A11) và các thiết bị hiện đại chạy iOS 17/18+.
+- **Pure Native Audio Streaming:** Sử dụng trực tiếp `AVFoundation` và `AVPlayer`, không nhúng Web Wrapper, không dùng WebView để phát nhạc, tiết kiệm tối đa RAM và thời lượng pin.
 - **Không quảng cáo & Không gián đoạn:** Truyền phát trực tiếp từ các CDN máy chủ của SoundCloud (`cf-media.sndcdn.com`).
-- **Phân phối linh hoạt:** Hỗ trợ cài đặt vĩnh viễn qua **TrollStore** (không sandbox, không bị giới hạn chứng chỉ 7 ngày) và Sideloading (AltStore, Sideloadly).
+- **Phân phối linh hoạt & An toàn Sideload:** Tương thích với cả **TrollStore** (chạy không sandbox) lẫn các công cụ sideload tiêu chuẩn (**AltStore**, **Sideloadly**) mà không gặp lỗi phân quyền hay xung đột sandbox.
 
 ---
 
@@ -60,9 +61,9 @@ flowchart LR
 
 ### Chi tiết các thành phần ngăn xếp:
 1. **Build Toolchain:** 
-   - `xtool`: Công cụ thay thế Xcode chạy trên Linux, cho phép gọi SwiftPM với các cờ cross-compile trỏ tới Darwin SDK.
+   - `xtool`: Công cụ thay thế Xcode chạy trên Linux, quản lý quy trình gọi SwiftPM kết hợp với các cờ cross-compile trỏ tới Darwin SDK.
    - `swiftly`: Trình quản lý phiên bản Swift toolchain trên Linux (`Swift 6.4.1+`).
-   - `Darwin SDK`: Bộ SDK trích xuất từ Xcode (chứa C/Objective-C/Swift header, `.tbd` stub libraries và metadata cho `arm64-apple-ios`).
+   - `Darwin SDK`: Bộ SDK trích xuất từ Xcode (chứa C/Objective-C/Swift headers, `.tbd` stub libraries và metadata cho kiến trúc `arm64-apple-ios`).
 2. **Cấu hình dự án thuần Declarative:**
    - Hoàn toàn **KHÔNG** dùng `.xcodeproj` hay `.xcworkspace`.
    - Hoàn toàn **KHÔNG** dùng Storyboards, `.xib`, hay `.nib`.
@@ -74,7 +75,7 @@ flowchart LR
      product: Scandium
      infoPath: Info.plist
      ```
-3. **Phân quyền TrollStore & Sandbox (`entitlements.plist`):**
+3. **Phân quyền Bảo mật Sideload & TrollStore (`entitlements.plist`):**
    ```xml
    <?xml version="1.0" encoding="UTF-8"?>
    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -85,13 +86,11 @@ flowchart LR
        <string>com.meohunter.scandium</string>
        <key>com.apple.private.security.no-sandbox</key>
        <true/>
-       <key>platform-application</key>
-       <true/>
    </dict>
    </plist>
    ```
    > [!IMPORTANT]
-   > `entitlements.plist` kích hoạt đặc quyền `com.apple.private.security.no-sandbox = true` để chạy dưới quyền root không sandbox trên TrollStore. Tuyệt đối **không** dùng `com.apple.private.security.no-container` vì sẽ bị daemon `amfid` bắn tín hiệu `SIGKILL` ngay khi khởi chạy.
+   > Trong phiên bản 1.4.0, khóa `platform-application` đã được loại bỏ hoàn toàn. Điều này giúp loại bỏ xung đột quyền bảo mật khi sideload qua AltStore/Sideloadly, trong khi vẫn giữ `com.apple.private.security.no-sandbox = true` để hỗ trợ tối ưu trên TrollStore. Mọi đường dẫn dữ liệu của app đều nằm gọn trong container chuẩn (`Documents`, `Caches`, `NSTemporaryDirectory()`).
 
 ---
 
@@ -131,7 +130,7 @@ sequenceDiagram
 | Hằng số | Giá trị Hex | Ý nghĩa với dyld |
 |---|---|---|
 | `LC_LOAD_DYLIB` | `0x0000000C` | Bắt buộc phải có thư viện. Thiếu sẽ làm sập app ngay lập tức (`SIGABRT`). |
-| `LC_LOAD_WEAK_DYLIB` | `0x80000018` | Liên kết yếu (`0x18 \| LC_REQ_DYLD`). Nếu thiếu thư viện trên hệ điều hành cũ, `dyld` bỏ qua và tiếp tục nạp nhị phân. |
+| `LC_LOAD_WEAK_DYLIB` | `0x80000018` | Liên kết yếu (`0x18 \| LC_REQ_DYLD`). Nếu thiếu thư viện trên hệ điều hành cũ, `dyld` bỏ qua và tiếp tục nạp nhị phân bình thường. |
 
 ---
 
@@ -155,7 +154,7 @@ graph TD
         B2["NavigationView + StackNavigationViewStyle hoặc Custom State Router"]
         B3["UIImpactFeedbackGenerator(style: .medium).impactOccurred()"]
         B4["ObservableObject + @Published + @StateObject / @ObservedObject"]
-        B5[".fill(.ultraThinMaterial) + Dynamic Ambient Gaussian Blur"]
+        B5[".fill(.ultraThinMaterial) + CoreImage CIGaussianBlur Downsampling"]
         B6[".font(.system(size: X, weight: ...))"]
         B7["UITableView.appearance().backgroundColor = .clear"]
     end
@@ -193,7 +192,8 @@ graph TD
     App --> Scraper["ClientIDScraper"]
     App --> API["SoundCloudAPI"]
     App --> Player["AudioPlayerEngine"]
-    App --> Lib["LibraryManager.shared"]
+    App --> Lib["LibraryManager.shared (SQLite3)"]
+    App --> Storage["StorageManager.shared (LRU 250MB)"]
     App --> Auth["SoundCloudAuthManager.shared"]
     
     Scraper -->|Cung cấp Client ID 32 ký tự| API
@@ -218,61 +218,54 @@ graph TD
 File: [`Sources/Scandium/ScandiumApp.swift`](file:///home/meohunter/Documents/Scandium/Sources/Scandium/ScandiumApp.swift)
 
 Điểm vào `@main` không tải ồ ạt toàn bộ cây giao diện ngay lập tức nhằm tránh xung đột tài nguyên giữa `UIWindowScene` và hệ thống âm thanh `AVFoundation`:
-1. **Pha 0 (Cài đặt chẩn đoán):** Ngay trong `init()`, gọi `CrashDiagnosticManager.shared.install()` để đăng ký các hàm bẫy tín hiệu C-Signal và Exception.
-2. **Pha 1 (Kiểm tra Safe Mode):** Trong sự kiện `.onAppear` của `WindowGroup`, kiểm tra cờ `didCrashDuringLastLaunch`. Nếu phiên trước đó bị crash, ứng dụng sẽ dựng `SafeModeView`.
-3. **Pha 2 (Mount UI chính thức):** Nếu không có sự cố, kích hoạt `isUIReady = true` qua hiệu ứng mờ dần (opacity transition), bơm toàn bộ các `@EnvironmentObject` (`scraper`, `api`, `player`, `library`) xuống cây giao diện.
+1. **Pha 0 (Cài đặt chẩn đoán):** Ngay trong `init()`, gọi `CrashDiagnosticManager.shared.install()` để mở sẵn file descriptor bắt lỗi và bảo toàn log crash cũ.
+2. **Pha 1 (Kiểm tra Safe Mode):** Trong sự kiện `.onAppear` của `WindowGroup`, kiểm tra cờ `didCrashDuringLastLaunch`. Nếu phiên trước đó bị crash, ứng dụng sẽ dựng `SafeModeView` hiển thị đầy đủ callstack.
+3. **Pha 2 (Mount UI chính thức & Kích hoạt LRU):** Nếu không có sự cố, kích hoạt `isUIReady = true` qua hiệu ứng mờ dần (opacity transition), bơm toàn bộ các `@EnvironmentObject` (`scraper`, `api`, `player`, `library`) xuống cây giao diện, đồng thời chạy nền `StorageManager.shared.evictAudioTempIfNeeded()` để dọn dẹp các tệp âm thanh tạm cũ.
 
 ---
 
-### 5.2. CrashDiagnosticManager — Hệ thống Bắt lỗi Fatal C-Signal
+### 5.2. CrashDiagnosticManager — Bẫy Lỗi Fatal C-Signal Chuẩn Async-Signal-Safe
 File: [`Sources/Scandium/Core/CrashDiagnosticManager.swift`](file:///home/meohunter/Documents/Scandium/Core/CrashDiagnosticManager.swift)
 
-Trên môi trường iOS không kết nối Xcode debugger (chạy độc lập qua TrollStore), khi xảy ra lỗi cấp thấp (như trỏ con trỏ null, gọi lệnh cấm, tràn bộ đệm), tiến trình sẽ bị hệ điều hành hủy ngay tức khắc. `CrashDiagnosticManager` giải quyết bài toán này:
-- **C-Convention Signal Handlers:** Đăng ký hàm bẫy mức kernel cho các tín hiệu:
-  - `SIGABRT` (Abort)
-  - `SIGILL` (Illegal Instruction — lỗi sinh mã không hợp lệ trên CPU cũ)
-  - `SIGSEGV` (Segmentation Fault)
-  - `SIGBUS` (Bus Error)
-  - `SIGFPE` (Floating Point Exception)
-  - `SIGPIPE` (Broken Pipe)
-  - `SIGTRAP` (Trace Trap)
-- **NSSetUncaughtExceptionHandler:** Bắt các ngoại lệ cấp cao của Objective-C / Cocoa.
-- **Trích xuất Stack Trace:** Khi có lỗi, hàm lập tức chụp 40 tầng gọi (`Thread.callStackSymbols`), tạo một bản báo cáo đầy đủ timestamp và lý do lỗi, ghi đồng bộ vào tệp tin `Documents/last_crash.txt` trước khi tiến trình kết thúc.
+Trên môi trường iOS không kết nối Xcode debugger, khi xảy ra lỗi cấp thấp (con trỏ null, heap hư hỏng, tràn bộ nhớ), tiến trình sẽ bị hạt nhân hủy tức khắc. Việc gọi các hàm cấp phát bộ nhớ heap như `Thread.callStackSymbols` hay Swift `String` bên trong C-signal handler sẽ gây deadlock hoặc crash lặp:
+
+#### Cải tiến cốt lõi trong v1.4.0:
+1. **Mở sẵn File Descriptor (Safe Context):** Trong `install()`, mở sẵn file descriptor thông qua `Darwin.open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)` trỏ vào `Documents/last_crash.txt`.
+2. **Bảo tồn Crash Log cũ:** Nếu phát hiện `last_crash.txt` từ phiên trước có dung lượng `> 0`, hệ thống tự động đọc và cache vào `previousCrashLog` đồng thời sao chép sang `Documents/previous_crash.txt` trước khi reset file descriptor mới, đảm bảo `SafeModeView` luôn đọc được đúng nguyên nhân sự cố.
+3. **100% Async-Signal-Safe Handlers:** Signal handler (`@convention(c)`) cho `SIGABRT`, `SIGILL`, `SIGSEGV`, `SIGBUS`, `SIGFPE`, `SIGPIPE`, `SIGTRAP` **CHỈ** sử dụng các lời gọi hệ thống an toàn:
+   - `Darwin.write()` để ghi header thông báo.
+   - `backtrace(&frames, 64)` để lấy địa chỉ các frame trên call stack.
+   - `backtrace_symbols_fd(&frames, count, crashLogFD)` để xả thẳng danh sách symbol ra file descriptor mà không cấp phát bất kỳ byte nào trên heap.
+   - `Darwin.fsync(crashLogFD)` để flush dữ liệu xuống đĩa trước khi re-raise tín hiệu mặc định.
+4. **Ngoại lệ Cấp cao:** `NSSetUncaughtExceptionHandler` vẫn được duy trì độc lập để xử lý các ngoại lệ `NSException` của Objective-C / Cocoa.
 
 ---
 
-### 5.3. ClientIDScraper — Cơ chế Cào Client ID Động & Đa tầng Dự phòng
+### 5.3. ClientIDScraper — Cơ chế Cào Client ID Động & FOSS Tuyệt Đối
 File: [`Sources/Scandium/Core/ClientIDScraper.swift`](file:///home/meohunter/Documents/Scandium/Core/ClientIDScraper.swift)
 
-SoundCloud API v2 yêu cầu một tham số `client_id` (chuỗi 32 ký tự hex/alphanumeric) trong mọi request. Scandium **tuyệt đối không hardcode** cố định một Client ID duy nhất để đảm bảo an toàn pháp lý và tránh app bị vô hiệu hóa khi SoundCloud đổi token web.
+SoundCloud API v2 yêu cầu tham số `client_id` (chuỗi 32 ký tự hex/alphanumeric) trong mọi request. Để tuân thủ cam kết FOSS và tránh bị SoundCloud chặn đồng loạt:
+- **Xóa bỏ 100% Fallback ID Hardcode:** Phiên bản 1.4.0 đã gỡ bỏ hoàn toàn danh sách Client ID tĩnh trong mã nguồn.
+- **Quét Động Mở Rộng 8 Bundle Cuối:** Khi cào động từ trang chủ hoặc `/discover`, hệ thống phân tích HTML, trích xuất tất cả các tệp JavaScript bundle trên CDN (`https://a-v2.sndcdn.com/assets/*.js`) và tải đồng thời **8 tệp JS cuối cùng** (`suffix(8)` trong reverse order).
+- **Hủy Tác Vụ Sớm (Early Termination):** Quá trình quét chạy trên `withThrowingTaskGroup`. Ngay khi bất kỳ tệp JS nào trích xuất thành công Client ID hợp lệ qua regex, nhóm tác vụ lập tức gọi `group.cancelAll()` và trả về kết quả, tiết kiệm băng thông và tăng tốc độ kết nối.
+- **Trạng thái `.noClientID`:** Nếu cả cào động và cache đều không khả dụng, hệ thống chuyển sang trạng thái `.noClientID` để giao diện hiển thị hướng dẫn người dùng nhập Manual Client ID trong Cài đặt.
 
 ```mermaid
 flowchart TD
     Start["Yêu cầu Client ID"] --> Step1{"Có Manual Override\ntrong Settings?"}
-    Step1 -- Có --> RetManual["Trả về Manual Client ID"]
+    Step1 -- Có --> RetManual["Trả về Manual Client ID (Trạng thái: .manual)"]
     Step1 -- Không --> Step2{"Có Cache hợp lệ\n(< 7 ngày)?"}
-    Step2 -- Có --> RetCache["Trả về Cached Client ID"]
-    Step2 -- Không --> Step3["Cào động từ SoundCloud Web"]
+    Step2 -- Có --> RetCache["Trả về Cached Client ID (Trạng thái: .cached)"]
+    Step2 -- Không --> Step3["Cào động từ SoundCloud Web (Desktop UA)"]
     
-    Step3 --> Step3_1["Tải HTML soundcloud.com với Desktop UA"]
-    Step3_1 --> Step3_2["Regex trích xuất link script a-v2.sndcdn.com/assets/*.js"]
-    Step3_2 --> Step3_3["Tải đồng thời 4 file JS cuối cùng (TaskGroup)"]
+    Step3 --> Step3_1["Tải HTML soundcloud.com & soundcloud.com/discover"]
+    Step3_1 --> Step3_2["Regex trích xuất danh sách asset JS"]
+    Step3_2 --> Step3_3["Tải đồng thời 8 file JS cuối cùng (TaskGroup)"]
     Step3_3 --> Step3_4["Áp dụng 6 mẫu Regex bắt client_id 32 ký tự"]
     
-    Step3_4 -- Thành công --> CacheAndRet["Lưu Cache & Trả về Token mới"]
-    Step3_4 -- Thất bại --> Step4["Kiểm tra 5 Fallback Client IDs có sẵn"]
-    Step4 --> Step4_1["Gửi test request xác thực với API v2"]
-    Step4_1 -- Hợp lệ --> RetFallback["Kích hoạt Fallback ID & Ghi Cache"]
-    Step4_1 -- Thất bại toàn bộ --> Err["Báo trạng thái FallbackError"]
+    Step3_4 -- Tìm thấy --> CacheAndRet["Lưu Cache & Trả về Token mới (Trạng thái: .online)"]
+    Step3_4 -- Thất bại --> Err["Chuyển trạng thái sang .noClientID\nHướng dẫn người dùng nhập thủ công"]
 ```
-
-#### Các mẫu biểu thức chính quy (Regex Patterns) được áp dụng:
-1. `client_id\s*:\s*"([a-zA-Z0-9]{32})"`
-2. `client_id\s*=\s*"([a-zA-Z0-9]{32})"`
-3. `"client_id"\s*:\s*"([a-zA-Z0-9]{32})"`
-4. `client_id\s*[:=]\s*'([a-zA-Z0-9]{32})'`
-5. `"clientId"\s*:\s*"([a-zA-Z0-9]{32})"`
-6. `\bclient_id=([a-zA-Z0-9]{32})\b`
 
 ---
 
@@ -282,7 +275,7 @@ File: [`Sources/Scandium/Core/SoundCloudAPI.swift`](file:///home/meohunter/Docum
 Endpoint cơ sở: `https://api-v2.soundcloud.com`. Lớp mạng này chịu trách nhiệm:
 
 1. **Tự Động Hồi Phục Khi Hết Hạn Token (Automatic Retry on 401/403):**  
-   Mọi request gửi qua hàm `performRawRequest` đều theo dõi mã phản hồi HTTP. Nếu máy chủ SoundCloud trả về `401 Unauthorized` hoặc `403 Forbidden`, hệ thống sẽ kích hoạt `scraper.refreshClientID()`, lấy ID mới, cập nhật tham số URL và tự động retry (tối đa 2 lần) mà người dùng không hề hay biết.
+   Mọi request gửi qua hàm `performRawRequest` đều theo dõi mã phản hồi HTTP. Nếu máy chủ SoundCloud trả về `401 Unauthorized` hoặc `403 Forbidden`, hệ thống sẽ kích hoạt `scraper.refreshClientID()`, lấy ID mới, cập nhật tham số URL và tự động retry (tối đa 2 lần) một cách hoàn toàn trong suốt với người dùng.
 
 2. **Chiến lược Phân Giải Luồng Phát (`resolveStreamURL`):**
    Mỗi bài hát trên SoundCloud có danh sách định dạng mã hóa (`track.media.transcodings`). Scandium áp dụng hệ thống tính điểm ưu tiên (`transcodingPriority`):
@@ -307,132 +300,106 @@ File: [`Sources/Scandium/Core/AudioPlayerEngine.swift`](file:///home/meohunter/D
 Lớp quản lý âm thanh cốt lõi duy trì một thể hiện `AVPlayer` duy nhất xuyên suốt vòng đời ứng dụng.
 
 #### Các đặc tính kỹ thuật nổi bật:
-- **Khởi tạo trễ (Lazy Setup - `setupIfNeeded`):** Việc gọi `AVAudioSession.setActive(true)` và gán handler cho `MPRemoteCommandCenter` quá sớm trong hàm `init()` khi giao diện `UIWindowScene` chưa hoàn tất sẽ dẫn đến crash hoặc treo luồng chính trên iOS 15. Scandium trì hoãn tác vụ này cho đến lần đầu tiên người dùng bấm phát nhạc.
+- **Khởi tạo trễ (Lazy Setup - `setupIfNeeded`):** Trì hoãn việc kích hoạt `AVAudioSession` cho đến lần đầu tiên phát nhạc để tránh xung đột với khởi tạo cửa sổ trên iOS 15.
 - **Tích hợp Trung tâm Điều khiển & Màn hình khóa:**
   - `MPNowPlayingInfoCenter`: Đồng bộ tiêu đề bài hát, tên nghệ sĩ, album, tổng thời lượng, vị trí phát hiện tại và ảnh bìa chất lượng cao (`MPMediaItemArtwork`).
   - `MPRemoteCommandCenter`: Lắng nghe các lệnh phần cứng (nút tai nghe, thanh điều khiển Lock Screen, Apple Watch): `play`, `pause`, `togglePlayPause`, `nextTrack`, `previousTrack`, `changePlaybackPosition` (seek).
-- **Tự động ngắt khi rút tai nghe (`handleAudioRouteChange`):**
-  Lắng nghe thông báo `AVAudioSession.routeChangeNotification`. Khi phát hiện lý do `.oldDeviceUnavailable` (tai nghe có dây bị rút hoặc AirPods bị ngắt kết nối Bluetooth), hệ thống tự động gọi `pause()` để tránh phát âm thanh lớn ra loa ngoài nơi công cộng.
-- **Xử lý gián đoạn cuộc gọi (`handleAudioInterruption`):**
-  Lắng nghe `AVAudioSession.interruptionNotification`. Tự động tạm dừng khi có cuộc gọi đến và tiếp tục phát (`.shouldResume`) khi cuộc gọi kết thúc.
-- **Cơ chế Hàng đợi & Autoplay (`handlePlaybackFinished`):**
-  Khi phát hết bài hát:
-  - Nếu bật **Repeat:** Lặp lại bài hoặc danh sách.
-  - Nếu bật **Shuffle:** Chọn ngẫu nhiên bài khác trong hàng đợi.
-  - Nếu hết danh sách và bật **Tự động phát bài liên quan (`autoPlayRelated`):** Tự động gọi API `getRelatedTracks(trackID:)` để nạp thêm 10 bài hát tương tự vào hàng đợi và tiếp tục phát không gián đoạn.
-  - Nếu gặp lỗi stream (`handlePlaybackFailed`) và bật **Tự chuyển bài khi lỗi (`autoSkipOnError`):** Tự động nhảy sang bài kế tiếp sau 1.2 giây.
-- **Hẹn giờ ngủ (Sleep Timer Engine):**
-  Hỗ trợ các mốc thời gian: 15, 30, 45, 60 phút hoặc dừng ngay khi kết thúc bài hát hiện tại (`.endOfTrack`).
+- **Tự động ngắt khi rút tai nghe (`handleAudioRouteChange`):** Lắng nghe `AVAudioSession.routeChangeNotification`, tự động dừng phát khi thiết bị âm thanh ngoại vi bị ngắt kết nối.
+- **Xử lý gián đoạn cuộc gọi (`handleAudioInterruption`):** Tự động tạm dừng khi có cuộc gọi và phát tiếp khi kết thúc cuộc gọi.
+- **Hàng đợi & Autoplay (`handlePlaybackFinished`):** Hỗ trợ Repeat, Shuffle, và tự động gọi API `getRelatedTracks` để nạp thêm 10 bài hát liên quan khi kết thúc danh sách.
 
 ---
 
 ### 5.6. SoundCloudAuthManager & KeychainHelper — Quản lý Danh tính & Bảo mật
 Files: [`Sources/Scandium/Core/SoundCloudAuthManager.swift`](file:///home/meohunter/Documents/Scandium/Core/SoundCloudAuthManager.swift), [`Sources/Scandium/Core/KeychainHelper.swift`](file:///home/meohunter/Documents/Scandium/Core/KeychainHelper.swift)
 
-Scandium hỗ trợ 3 phương thức xác thực và liên kết tài khoản:
-1. **Web Popup Đăng nhập Tự động (`SoundCloudLoginSheet`):**  
-   Mở popup `WKWebView` trỏ tới `https://soundcloud.com/signin`. Hệ thống cài đặt `WKHTTPCookieStoreObserver` giám sát luồng cookie. Ngay khi người dùng đăng nhập thành công và cookie `oauth_token` xuất hiện, hệ thống tự động bắt mã token, đóng WebView và tiến hành đồng bộ.
-2. **Nhập OAuth Token Thủ công:** Người dùng có thể lấy mã `oauth_token` từ trình duyệt máy tính hoặc công cụ phân tích gói tin mạng và dán vào ứng dụng.
-3. **Liên kết qua Link Trang cá nhân:** Dán URL dạng `soundcloud.com/username` để đồng bộ các dữ liệu công khai thông qua endpoint `/resolve`.
-
-#### Bảo mật Token bằng Apple Keychain:
-Token OAuth là dữ liệu nhạy cảm. Scandium **không lưu trữ token dưới dạng văn bản thô (plaintext) trong `UserDefaults`**:
-- Lưu trữ trong **iOS Keychain** với lớp `kSecClassGenericPassword`, service `com.meohunter.scandium.oauth`.
-- Áp dụng quyền truy cập `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` (chỉ truy cập được sau khi thiết bị đã mở khóa lần đầu và không đồng bộ lên iCloud).
-- Tự động di chuyển (migrate) và xóa sạch token cũ trong `UserDefaults` nếu phát hiện tồn tại từ các phiên bản trước.
+- **Đăng nhập Web OAuth (`SoundCloudLoginSheet`):** Sử dụng `WKWebView` bọc qua `UIViewRepresentable` để giám sát cookie thông qua `WKHTTPCookieStoreObserver`. Khi phát hiện cookie `oauth_token`, hệ thống tự động lưu trữ và đồng bộ hóa thông tin người dùng.
+- **Bảo mật Keychain Chuẩn:** Token được lưu trữ trong **iOS Keychain** với `kSecClassGenericPassword` và `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
 
 ---
 
-### 5.7. LibraryManager & StorageManager — Quản lý Thư viện & Bộ nhớ Đệm
-Files: [`Sources/Scandium/Core/LibraryManager.swift`](file:///home/meohunter/Documents/Scandium/Core/LibraryManager.swift), [`Sources/Scandium/Core/StorageManager.swift`](file:///home/meohunter/Documents/Scandium/Core/StorageManager.swift)
+### 5.7. LibraryManager — Cơ sở Dữ liệu Bản địa SQLite3 & Migration
+File: [`Sources/Scandium/Core/LibraryManager.swift`](file:///home/meohunter/Documents/Scandium/Core/LibraryManager.swift)
 
-- **`LibraryManager`:** Quản lý danh sách bài hát yêu thích (Liked Tracks), lịch sử nghe nhạc gần đây (Recently Played — tối đa 50 mục) và danh sách phát cá nhân (Playlists). Dữ liệu được mã hóa JSON và lưu trữ cục bộ. Khi kết nối tài khoản SoundCloud, hệ thống tự động gộp (merge) dữ liệu từ xa mà không làm mất các bài hát đã thích trước đó trên thiết bị.
-- **`StorageManager`:** Thực hiện thống kê chi tiết dung lượng sử dụng theo byte:
-  - Dung lượng bộ nhớ cache ảnh bìa (`URLCache.shared` + thư mục cache riêng).
-  - Dung lượng file đệm âm thanh tạm (`NSTemporaryDirectory`).
-  - Dung lượng dữ liệu cấu hình người dùng.
-  - Cho phép người dùng dọn dẹp riêng từng phần (chỉ xóa ảnh bìa hoặc chỉ xóa bộ đệm âm thanh tạm) mà vẫn bảo toàn 100% danh sách bài hát yêu thích và cấu hình cá nhân.
+Trong phiên bản 1.4.0, toàn bộ cơ chế lưu trữ JSON phẳng vào `UserDefaults` đã được thay thế bằng **SQLite3 C API** bản địa:
+- **Tệp cơ sở dữ liệu:** Lưu trữ tại `Documents/scandium_library.db`.
+- **Cấu trúc bảng (Schema):**
+  - `liked_tracks`: `(id INTEGER PRIMARY KEY, json_data TEXT NOT NULL, position INTEGER NOT NULL)`
+  - `recently_played`: `(id INTEGER PRIMARY KEY, json_data TEXT NOT NULL, position INTEGER NOT NULL)`
+  - `playlists`: `(id INTEGER PRIMARY KEY, json_data TEXT NOT NULL, position INTEGER NOT NULL)`
+- **Tự động Di chuyển Dữ liệu (Automated Migration):** Khi khởi chạy lần đầu trên bản 1.4.0, hệ thống tự động kiểm tra các khóa JSON cũ (`scandium_liked_tracks_v1`, `scandium_recently_played_v1`, `scandium_user_playlists_v1`), import toàn bộ danh sách vào SQLite3, sau đó dọn dẹp các khóa cũ trong `UserDefaults`.
+- **Tương thích Toolchain Linux:** Khai báo hằng số `SQLITE_TRANSIENT` tường minh bằng `unsafeBitCast(-1, to: sqlite3_destructor_type.self)` để triệt tiêu lỗi thiếu macro trên trình biên dịch Linux.
+- **An toàn Luồng:** Mọi thao tác truy vấn và cập nhật SQLite được đồng bộ hóa qua hàng đợi nối tiếp `DispatchQueue(label: "com.scandium.db")`.
 
 ---
 
-### 5.8. AppSettings — Hệ thống Tùy biến & Quản lý Alternate Icon
+### 5.8. StorageManager — Thống kê & Cơ chế Dọn dẹp Bộ nhớ Đệm LRU Tự động
+File: [`Sources/Scandium/Core/StorageManager.swift`](file:///home/meohunter/Documents/Scandium/Core/StorageManager.swift)
+
+- **Thống kê dung lượng 3 thành phần:** Bộ nhớ đệm ảnh bìa, dữ liệu âm thanh mạng tạm thời và dữ liệu người dùng.
+- **Thuật toán Dọn dẹp LRU (Least Recently Used) Tự động:**
+  - **Giới hạn trần:** Đặt mặc định là **250 MB**.
+  - **Ngưỡng đích:** Khi tổng dung lượng vượt quá 250 MB, thuật toán quét thời gian truy cập gần nhất (`contentAccessDate`), sắp xếp tăng dần và tự động xóa các file cũ nhất cho đến khi dung lượng giảm xuống dưới **80% (200 MB)**.
+  - **Khu vực áp dụng:** 
+    1. Thư mục ảnh `Caches/scandium_image_cache` (`ImageCacheStore.evictIfNeeded()`).
+    2. Thư mục âm thanh tạm trong `NSTemporaryDirectory()` (`StorageManager.evictAudioTempIfNeeded()`).
+  - **Kích hoạt tự động:** Chạy trên hàng đợi nền (`qos: .utility`) ngay khi ứng dụng khởi chạy thành công.
+
+---
+
+### 5.9. AppSettings — Hệ thống Tùy biến & Quản lý Alternate Icon
 File: [`Sources/Scandium/Core/AppSettings.swift`](file:///home/meohunter/Documents/Scandium/Core/AppSettings.swift)
 
-Quản lý trạng thái toàn cục của ứng dụng:
-- **Giao diện & Chế độ màu:** Dark Mode (nền đen thuần OLED `#000000`), Light Mode, hoặc Theo cài đặt hệ thống.
-- **Màu nhấn chủ đạo (Accent Colors):**
-  - Emerald Green (Xanh lục phong cách Spotify): `#1DB954`
-  - Amber Orange (Màu cam đặc trưng SoundCloud): `#FF5500`
-  - Neon Cyan (Xanh lam điện tử): `#00E5FF`
-  - Violet Purple (Tím huyền bí): `#BB86FC`
-- **Đa ngôn ngữ độc lập:** Hỗ trợ song ngữ Tiếng Việt (`vi`) và English (`en`), cho phép người dùng chuyển đổi ngôn ngữ giao diện ngay trong app mà không cần đổi ngôn ngữ toàn hệ điều hành.
-- **Hệ thống Thay đổi Biểu tượng Ứng dụng (Alternate App Icons):**
-  Hỗ trợ 5 bộ biểu tượng: *Mặc định (Green), Cam Kim loại (Orange), Xanh Lam Điện tử (Cyan), Tím Huyền bí (Purple), Trắng Đen Đơn sắc (Monochrome)*.  
-  > [!TIP]
-  > Khi đổi icon trên môi trường TrollStore, hệ điều hành có thể trả về mã lỗi `OSStatus -54` do quyền ghi cache SpringBoard. `AppSettings` đã được lập trình sẵn để xử lý bắt lỗi này, lưu trạng thái thành công và hướng dẫn người dùng sử dụng tính năng *Rebuild Icon Cache* trong TrollStore nếu icon màn hình chính chưa cập nhật tức thì.
+- **Giao diện & Chế độ màu:** Hỗ trợ Dark Mode (OLED Black), Light Mode và Theo hệ thống.
+- **Màu nhấn chủ đạo:** Spotify Green (`#1DB954`), Amber Orange (`#FF5500`), Neon Cyan (`#00E5FF`), Violet Purple (`#BB86FC`).
+- **Đa ngôn ngữ độc lập:** Tiếng Việt (`vi`) và Tiếng Anh (`en`) có thể tùy chọn độc lập trong app.
+- **Alternate Icons:** Hỗ trợ 5 bộ biểu tượng với cơ chế xử lý lỗi `OSStatus -54` an toàn trên TrollStore.
 
 ---
 
-## 6. Hệ thống Thiết kế Giao diện (Design System: Liquid Glass & Threads Flat)
+## 6. Hệ thống Thiết kế Giao diện & Tối ưu GPU CoreImage
 
-Giao diện của Scandium là sự kết hợp hài hòa giữa ngôn ngữ quang học **Liquid Glass** và phong cách danh sách phẳng tối giản lấy cảm hứng từ **Threads by Meta** và **Spotify Clean UI**.
+Giao diện Scandium là sự kết hợp giữa ngôn ngữ quang học **Liquid Glass** và phong cách danh sách phẳng tối giản lấy cảm hứng từ **Threads by Meta** và **Spotify Clean UI**.
 
-```mermaid
-graph TD
-    Canvas["Nền Ambient Canvas (OLED Black + Blur Artwork 60pt, Opacity 18%)"]
-    Canvas --> Tabs["MainContainerView (4 Tabs Chính)"]
-    Tabs --> D["DiscoverView (Quick Picks 2 Cột + Carousel 148x148)"]
-    Tabs --> S["SearchView (Quick Filter Tags + 10 Thể loại Gradient + Lịch sử)"]
-    Tabs --> L["LibraryView (5 Danh mục con + Chi tiết Playlist Sheet)"]
-    Tabs --> P["ProfileView (Threads-style Flat Rows + Biểu đồ Phân bổ Bộ nhớ)"]
-    Tabs --> Mini["FloatingMiniPlayer (Viên nang kính nổi 56pt + Thanh tiến trình 2pt)"]
-    Mini --> Full["FullPlayerView (Vuốt xuống để đóng + WaveformScrubber + 5 Nút điều khiển)"]
-```
-
-### Các thành phần giao diện đặc trưng:
-1. **`AmbientCanvasBackground`:**
-   Nền ứng dụng không bao giờ là màu đen đơn điệu. Hệ thống lấy ảnh bìa của bài hát đang phát, phóng to phủ kín màn hình, áp dụng Gaussian blur bán kính lớn (`.blur(radius: 60)`) với độ mờ dịu mắt (18%) trên nền đen tuyệt đối OLED.
-2. **`CachedAsyncImage` & `ImageCacheStore`:**
-   Hệ thống tải và lưu đệm ảnh 2 tầng: Tầng bộ nhớ RAM (`NSCache`, giới hạn 300 ảnh / 150MB) và Tầng ổ đĩa (`Caches/scandium_image_cache`). Tích hợp sẵn hiệu ứng gradient lấp lánh (Shimmer) khi đang tải ảnh.
-3. **`WaveformScrubber`:**
-   Vẽ lại đồ thị sóng âm thanh đặc trưng của SoundCloud từ mảng mẫu số thực (`[Float]`). Thuật toán tự động giảm mật độ điểm (downsample) theo chiều rộng màn hình, tô màu sáng cho phần đã phát và hỗ trợ kéo vuốt (drag gesture) để tua bài hát mượt mà.
-4. **`FloatingMiniPlayer`:**
-   Thanh điều khiển thu nhỏ dạng viên nang bo tròn 12pt nổi lơ lửng phía trên thanh Tab Bar. Sử dụng chất liệu kính mờ `.ultraThinMaterial`, hiển thị ảnh bìa 40x40, tên bài hát, nghệ sĩ, nút thả tim nhanh, nút play/pause và thanh tiến trình 2pt màu xanh lục dưới đáy.
+### Đột phá Tối ưu GPU cho `AmbientCanvasBackground` trong v1.4.0:
+- **Vấn đề trên bản cũ:** Sử dụng trực tiếp `.blur(radius: 60)` trên SwiftUI View toàn màn hình gây sụt giảm FPS nghiêm trọng và làm nóng máy trên các dòng chip A9–A11 (iPhone 6s/7/8).
+- **Giải pháp v1.4.0:** 
+  1. Khi bài hát thay đổi, hệ thống tải ảnh bìa và đưa xuống hàng đợi nền `DispatchQueue`.
+  2. Ảnh được downsample xuống kích thước siêu nhỏ **48×48 px**.
+  3. Áp dụng bộ lọc `CIGaussianBlur` (radius: 12) thông qua **CoreImage** một lần duy nhất trên background thread để tạo một `UIImage` tĩnh đã làm mờ.
+  4. Cache kết quả vào từ điển `blurredArtworkCache` với `DispatchQueue` concurrent kết hợp barrier writes.
+  5. Hiển thị full-screen bằng `Image(uiImage:)` phóng to và opacity 0.35, **loại bỏ hoàn toàn modifier `.blur()` của SwiftUI**. Kết quả mang lại trải nghiệm 60 FPS mượt mà tuyệt đối mà không gây hao pin.
 
 ---
 
-## 7. Quy trình Đóng gói Tự động hoá & Kiểm toán Tiền Biên dịch (CI/CD Pipeline)
+## 7. Quy trình Đóng gói Tự động hoá & Kiểm toán Tiền Biên dịch (Auditing)
 
-Dự án cung cấp bộ công cụ tự động hóa hoàn chỉnh phục vụ kiểm tra an toàn và xuất file `.ipa`.
+Quy trình đóng gói của Scandium được kiểm soát chặt chẽ bởi script kiểm toán và đóng gói:
 
 ```mermaid
 flowchart TD
-    Start["Bắt đầu: ./scripts/build_ipa.sh"] --> Audit["Chạy scripts/prebuild_audit.py"]
+    Start["Chạy: ./scripts/build_ipa.sh"] --> Audit["Chạy scripts/prebuild_audit.py"]
     Audit --> Check1["1. Kiểm tra tính hợp lệ Info.plist & entitlements.plist"]
-    Check1 --> Check2["2. Quét force-unwrap: try!, as!, URL(...)!"]
-    Check2 --> Check3["3. Kiểm toán EnvironmentObject injection"]
-    Check3 --> Check4["4. Kiểm tra phòng vệ Frame âm: max(1, ...)"]
-    Check4 --> Check5["5. Quét Blacklist Modifiers theo rule.md"]
+    Audit --> Check2["2. Quét unwrap nguy hiểm: try!, as!, URL(...)!"]
+    Audit --> Check3["3. Kiểm toán EnvironmentObject injection toàn bộ Views"]
+    Audit --> Check4["4. Kiểm tra phòng vệ Frame âm: max(1, ...)"]
+    Audit --> Check5["5. Quét Blacklist Modifiers theo rule.md (Có Whitelist)"]
+    Audit --> Check6["6. Quét symbol cấm: llvm-nm _FixedSizeLayout"]
     
-    Check5 -- PASS --> Xtool["Biên dịch: xtool dev build -c release"]
-    Check5 -- FAIL --> Stop["Dừng build & Xuất danh sách lỗi chi tiết"]
+    Check6 -- PASS (0 Lỗi) --> Xtool["Biên dịch: xtool dev build -c release"]
+    Check6 -- FAIL --> Stop["Dừng quy trình & Báo lỗi chi tiết"]
     
-    Xtool --> CopyAssets["Sao chép 21 AppIcon PNGs vào Scandium.app"]
+    Xtool --> CopyAssets["Sao chép AppIcon assets vào Scandium.app"]
     CopyAssets --> Patch["Chạy scripts/patch_macho_weak.py (Vá Mach-O Weak Links)"]
     Patch --> Sign["Ký giả lập Ad-hoc: ldid -Sentitlements.plist"]
-    Sign --> Package["Đóng gói thư mục Payload thành Scandium.ipa (Zip -9)"]
-    Package --> Done["Xuất file hoàn tất: Scandium.ipa (Sẵn sàng cài đặt)"]
+    Sign --> Package["Đóng gói Payload thành Scandium.ipa (Zip -9)"]
+    Package --> Done["Xuất file hoàn tất: Scandium.ipa (v1.4.0)"]
 ```
 
-### Chi tiết các script trong thư mục `scripts/`:
-- **`scripts/prebuild_audit.py`:**  
-  Script kiểm toán gồm 10 bước kiểm tra nghiêm ngặt: Xác thực plist, kiểm tra Built Info.plist, quét tìm các lệnh unwrap nguy hiểm (`try!`, `as!`), kiểm tra việc inject `@EnvironmentObject` ở tất cả các view và modal sheet, kiểm tra công thức trừ frame, chạy logic unit test độc lập và kiểm tra symbol nhị phân bằng `llvm-nm`.
-- **`scripts/patch_macho_weak.py`:**  
-  Đọc trực tiếp cấu trúc nhị phân Mach-O 64-bit arm64, chuyển đổi toàn bộ `LC_LOAD_DYLIB` của các framework iOS 18+ thành `LC_LOAD_WEAK_DYLIB`.
-- **`scripts/generate_icons.py`:**  
-  Script đồ họa sử dụng thư viện `Pillow` kết hợp supersampling 2048x2048, vẽ biểu tượng số "21" kim loại cùng thanh sóng âm thanh và xuất ra toàn bộ 21 kích thước icon chuẩn cho iPhone, iPad và các phiên bản màu alternate icon.
-- **`scripts/build_ipa.sh`:**  
-  Script bash hợp nhất toàn bộ quy trình: gọi `xtool`, copy assets, vá nhị phân, ký giả lập qua `ldid` và nén thành gói cài đặt `Scandium.ipa`.
+### Script kiểm toán `scripts/prebuild_audit.py`:
+- Thực hiện 10 hạng mục kiểm tra độc lập trước mỗi lượt build.
+- **Whitelist cho `SoundCloudLoginSheet.swift`:** Ngoại lệ cho việc sử dụng `UIViewRepresentable` vì đây là thành phần bắt buộc để bọc `WKWebView` và bắt cookie đăng nhập.
+- **Kiểm tra symbol Mach-O:** Quét undefined symbols bằng `llvm-nm`, đảm bảo không chứa `_FixedSizeLayout`.
 
 ---
 
@@ -442,7 +409,7 @@ flowchart TD
 Scandium/
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
-│   │   ├── bug_report.yml             # Mẫu báo cáo lỗi GitHub
+│   │   ├── bug_report.yml             # Mẫu báo cáo lỗi GitHub (v1.4.0)
 │   │   ├── config.yml                 # Cấu hình form GitHub
 │   │   └── feature_request.yml        # Mẫu yêu cầu tính năng
 │   └── pull_request_template.md       # Mẫu Pull Request tiêu chuẩn
@@ -453,19 +420,19 @@ Scandium/
 │   ├── build_ipa.sh                   # Script build, vá Mach-O, ký ldid & đóng gói IPA
 │   ├── generate_icons.py              # Script sinh icon đồ họa 2048x2048 -> đa kích thước
 │   ├── patch_macho_weak.py            # Công cụ sửa byte Mach-O (LC_LOAD_DYLIB -> LC_LOAD_WEAK_DYLIB)
-│   └── prebuild_audit.py              # Script kiểm toán an toàn mã nguồn 10 bước trước khi build
+│   └── prebuild_audit.py              # Script kiểm toán an toàn mã nguồn trước khi build
 ├── Sources/
 │   └── Scandium/
 │       ├── Core/                      # Tầng logic nghiệp vụ & Động cơ trung tâm
 │       │   ├── AppSettings.swift             # Quản lý cấu hình, giao diện, haptics, alternate icons
 │       │   ├── AudioPlayerEngine.swift       # Quản lý AVPlayer, NowPlaying, Remote Commands, Queue
-│       │   ├── ClientIDScraper.swift         # Trích xuất client_id động từ JS web bundle
-│       │   ├── CrashDiagnosticManager.swift  # Bắt C-Signal, ghi log sự cố và cứu hộ Safe Mode
+│       │   ├── ClientIDScraper.swift         # Trích xuất client_id động từ 8 file JS, không fallback tĩnh
+│       │   ├── CrashDiagnosticManager.swift  # Bẫy C-Signal chuẩn async-signal-safe, bảo tồn log Safe Mode
 │       │   ├── KeychainHelper.swift          # Wrapper lưu trữ an toàn iOS Keychain
-│       │   ├── LibraryManager.swift          # Quản lý bài hát đã thích, lịch sử nghe, playlists cục bộ
+│       │   ├── LibraryManager.swift          # Lưu trữ SQLite3 bản địa, tự động migration từ UserDefaults
 │       │   ├── SoundCloudAPI.swift           # Tầng mạng API v2, retry 401/403, phân giải stream
 │       │   ├── SoundCloudAuthManager.swift   # Quản lý OAuth token, đồng bộ tài khoản người dùng
-│       │   └── StorageManager.swift          # Thống kê chi tiết & dọn dẹp bộ nhớ đệm
+│       │   └── StorageManager.swift          # Thống kê dung lượng & dọn dẹp bộ đệm âm thanh LRU 250MB
 │       ├── Models/                    # Cấu trúc dữ liệu Codable
 │       │   └── Track.swift                   # Model Track, User, Playlist, Transcoding, Waveform
 │       ├── Resources/                 # Tài nguyên đi kèm module SPM
@@ -475,7 +442,7 @@ Scandium/
 │       │   │   ├── GlassTrackRow.swift       # Hàng hiển thị bài hát chuẩn Spotify/Threads
 │       │   │   └── WaveformScrubber.swift    # Thanh tua nhạc biểu diễn sóng âm thanh
 │       │   ├── Theme/
-│       │   │   └── LiquidGlassModifier.swift # Design tokens, bảng màu, AsyncImage cache 2 tầng
+│       │   │   └── LiquidGlassModifier.swift # Design tokens, CoreImage blur GPU, LRU ImageCacheStore
 │       │   └── Views/
 │       │       ├── DiscoverView.swift        # Tab 0: Khám phá, Quick Picks 2 cột & Carousels
 │       │       ├── FullPlayerView.swift      # Trình phát toàn màn hình, cử chỉ vuốt xuống, queue
@@ -489,15 +456,15 @@ Scandium/
 │       └── ScandiumApp.swift          # @main entry point, Staged Launch & Safe Mode View
 ├── Tests/
 │   └── ScandiumTests/
-│       └── ScandiumTests.swift        # Bộ kiểm thử đơn vị: JSON decoders, Regex, Helpers
-├── entitlements.plist                 # Quyền hạn TrollStore (no-sandbox = true)
-├── Info.plist                         # Cấu hình bundle, UIBackgroundModes = [audio], Alternate Icons
+│       └── ScandiumTests.swift        # Bộ kiểm thử đơn vị: SQLite migration, LRU cache, regex, decoders
+├── entitlements.plist                 # Quyền hạn TrollStore (no-sandbox = true, không platform-application)
+├── Info.plist                         # Cấu hình bundle (v1.4.0), UIBackgroundModes = [audio], Alternate Icons
 ├── instructions.md                    # Bản đặc tả kỹ thuật dự án ban đầu
 ├── LICENSE                            # Giấy phép mã nguồn mở GNU General Public License v3.0
 ├── Package.swift                      # Cấu hình Swift Package Manager (Target iOS 15.0)
 ├── README.md                          # Giới thiệu dự án, ảnh chụp màn hình, hướng dẫn cài đặt
 ├── rule.md                            # Quy tắc kiểm soát modifier & an toàn tương thích iOS 15
-├── Scandium.ipa                       # Gói cài đặt hoàn chỉnh dành cho iOS
+├── Scandium.ipa                       # Gói cài đặt hoàn chỉnh dành cho iOS (v1.4.0)
 └── xtool.yml                          # Cấu hình biên dịch của công cụ xtool
 ```
 
@@ -511,8 +478,8 @@ Scandium/
    - Ứng dụng **không sử dụng** logo chính thức của SoundCloud (hình đám mây). Thay vào đó, dự án xây dựng bộ nhận diện riêng mang phong cách hóa học: `[21 Sc] Scandium`.
    - Scandium là phần mềm độc lập của bên thứ ba được phát triển cho mục đích giáo dục và phi thương mại, không có bất kỳ mối liên hệ hay sự bảo trợ nào từ phía *SoundCloud Global Limited & Co. KG*.
 3. **An toàn Pháp lý về Dữ liệu:**  
-   - Mã nguồn **không chứa tĩnh bất kỳ API Key bí mật nào**.
-   - Ứng dụng **không cung cấp tính năng tải nhạc MP3 ngoại tuyến vĩnh viễn** (No permanent MP3 downloading). Tất cả dữ liệu âm thanh được truyền phát trực tiếp theo luồng và lưu tạm thời trên bộ nhớ đệm phục vụ cho trải nghiệm nghe liền mạch, đúng với quy chuẩn của các trình phát web tiêu chuẩn.
+   - Mã nguồn **không chứa tĩnh bất kỳ API Key bí mật hay Client ID hardcode nào**.
+   - Ứng dụng **không cung cấp tính năng tải nhạc MP3 ngoại tuyến vĩnh viễn** (No permanent MP3 downloading). Tất cả dữ liệu âm thanh được truyền phát trực tiếp theo luồng và lưu tạm thời trên bộ nhớ đệm tự động dọn dẹp theo cơ chế LRU phục vụ cho trải nghiệm nghe liền mạch, đúng với quy chuẩn của các trình phát web tiêu chuẩn.
 
 ---
-*Tài liệu kỹ thuật được tổng hợp và duy trì bởi MeoHunter cho dự án Scandium.*
+*Tài liệu kỹ thuật được tổng hợp và duy trì bởi MeoHunter cho dự án Scandium (Cập nhật phiên bản 1.4.0).*

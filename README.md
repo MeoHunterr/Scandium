@@ -7,8 +7,9 @@ Native SoundCloud client for legacy and modern iOS.
 Install via TrollStore or sideloading, open it, and stream directly without ads or web wrappers. Scandium is built from scratch in SwiftUI for iOS 15.0 and later:
 
 - **Native Audio Engine.** Streams progressive MP3 (128kbps) and HLS AAC (256kbps) directly through `AVFoundation`. Supports background playback, Lock Screen and Control Center integration (`MPNowPlayingInfoCenter`, `MPRemoteCommandCenter`), variable playback speeds (`0.8x` to `2.0x`), and continuous autoplay queues.
-- **Dynamic Client ID Extraction.** Automatically scrapes and caches valid 32-character SoundCloud v2 `client_id` tokens from public web bundles with multi-tier fallbacks and manual override support—no hardcoded credentials required.
-- **Account Sync & Local Library.** Sign in via Web OAuth, token, or profile URL to sync your liked tracks, playlists, albums, and followed artists, backed by a two-tier memory and disk cache for instant startup.
+- **Dynamic Client ID Extraction.** Automatically scrapes valid 32-character SoundCloud v2 `client_id` tokens from public JavaScript bundles with parallel extraction and manual override support—zero hardcoded credentials (100% FOSS compliant).
+- **SQLite3 Local Library & Account Sync.** Sign in via Web OAuth, token, or profile URL to sync your liked tracks, playlists, albums, and followed artists, backed by native C `SQLite3` persistence and automatic 250MB LRU disk cache eviction.
+- **GPU-Accelerated Ambient Artwork.** Background glow pre-rendered on background threads via `CoreImage` downsampling and `CIGaussianBlur`, sustaining smooth 60 FPS on legacy A9–A11 chips without SwiftUI live view blur.
 - **Linux Cross-Compilation.** Designed to compile without macOS or Xcode using `xtool` and the Darwin Swift SDK, complete with automated Mach-O weak-link patching (`SwiftUICore`) for backward compatibility down to iOS 15.
 
 ## Screenshots
