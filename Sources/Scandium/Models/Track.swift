@@ -353,6 +353,10 @@ struct WaveformData: Codable {
 
 // MARK: - Playlist Model
 
+private struct PlaylistTrackStub: Decodable {
+    let id: Int?
+}
+
 struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
     let id: Int
     let title: String
@@ -369,6 +373,72 @@ struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
         case trackCount = "track_count"
         case artworkURL = "artwork_url"
         case permalinkURL = "permalink_url"
+    }
+
+    init(
+        id: Int,
+        title: String,
+        description: String? = nil,
+        duration: Int? = nil,
+        trackCount: Int? = nil,
+        artworkURL: String? = nil,
+        permalinkURL: String? = nil,
+        tracks: [Track]? = nil,
+        user: SoundCloudUser? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.description = description
+        self.duration = duration
+        self.trackCount = trackCount
+        self.artworkURL = artworkURL
+        self.permalinkURL = permalinkURL
+        self.tracks = tracks
+        self.user = user
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(Int.self, forKey: .id)
+        self.title = (try? container.decodeIfPresent(String.self, forKey: .title)) ?? "Untitled Playlist"
+        self.description = try? container.decodeIfPresent(String.self, forKey: .description)
+        self.duration = try? container.decodeIfPresent(Int.self, forKey: .duration)
+        self.trackCount = try? container.decodeIfPresent(Int.self, forKey: .trackCount)
+        self.artworkURL = try? container.decodeIfPresent(String.self, forKey: .artworkURL)
+        self.permalinkURL = try? container.decodeIfPresent(String.self, forKey: .permalinkURL)
+        self.user = try? container.decodeIfPresent(SoundCloudUser.self, forKey: .user)
+
+        // Resilient tracks decoding:
+        // SoundCloud playlist summaries often include track stubs with only {"id": 123} without title/duration.
+        // We decode full tracks if present, or ignore incomplete track stubs so the playlist doesn't fail decoding.
+        if let directTracks = try? container.decodeIfPresent([Track].self, forKey: .tracks) {
+            self.tracks = directTracks
+        } else if var tracksUnkeyed = try? container.nestedUnkeyedContainer(forKey: .tracks) {
+            var validTracks: [Track] = []
+            while !tracksUnkeyed.isAtEnd {
+                if let t = try? tracksUnkeyed.decode(Track.self) {
+                    validTracks.append(t)
+                } else {
+                    _ = try? tracksUnkeyed.decode(PlaylistTrackStub.self)
+                }
+            }
+            self.tracks = validTracks.isEmpty ? nil : validTracks
+        } else {
+            self.tracks = nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(duration, forKey: .duration)
+        try container.encodeIfPresent(trackCount, forKey: .trackCount)
+        try container.encodeIfPresent(artworkURL, forKey: .artworkURL)
+        try container.encodeIfPresent(permalinkURL, forKey: .permalinkURL)
+        try container.encodeIfPresent(tracks, forKey: .tracks)
+        try container.encodeIfPresent(user, forKey: .user)
     }
 
     static func == (lhs: SoundCloudPlaylist, rhs: SoundCloudPlaylist) -> Bool {

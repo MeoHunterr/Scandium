@@ -70,7 +70,7 @@ struct FullPlayerView: View {
             .clipped()
             .offset(y: max(0, dragOffsetY))
             .gesture(
-                DragGesture(minimumDistance: 15)
+                DragGesture(minimumDistance: 25)
                     .onChanged { value in
                         if value.translation.height > 0 {
                             dragOffsetY = value.translation.height
@@ -252,6 +252,7 @@ struct FullPlayerView: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(player.isShuffleEnabled ? ScandiumTheme.spotifyGreen : Color.white.opacity(0.6))
                     .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
 
@@ -265,6 +266,7 @@ struct FullPlayerView: View {
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(width: 48, height: 48)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
 
@@ -285,6 +287,7 @@ struct FullPlayerView: View {
                         .foregroundColor(.black)
                         .offset(x: player.playbackState.isPlaying ? 0 : 2)
                 }
+                .contentShape(Circle())
             }
             .buttonStyle(PlainButtonStyle())
 
@@ -298,6 +301,7 @@ struct FullPlayerView: View {
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(width: 48, height: 48)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
 
@@ -311,6 +315,7 @@ struct FullPlayerView: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(player.isRepeatEnabled ? ScandiumTheme.spotifyGreen : Color.white.opacity(0.6))
                     .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(PlainButtonStyle())
         }

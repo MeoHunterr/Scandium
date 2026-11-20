@@ -299,6 +299,61 @@ def check_logic_tests():
     except Exception as e:
         report(False, "Track JSON stub decodes correctly", str(e))
 
+    # Test: Likes pagination next_href extraction
+    likes_page_json = '''{
+        "collection": [
+            {"track": {"id": 101, "title": "Track 1"}},
+            {"track": {"id": 102, "title": "Track 2"}}
+        ],
+        "next_href": "https://api-v2.soundcloud.com/me/likes/tracks?offset=2&limit=50"
+    }'''
+    try:
+        likes_obj = json.loads(likes_page_json)
+        tracks = [item.get("track") for item in likes_obj.get("collection", []) if item.get("track")]
+        next_href = likes_obj.get("next_href")
+        ok = len(tracks) == 2 and next_href is not None and "offset=2" in next_href
+        report(ok, "Likes next_href pagination extracts correctly")
+    except Exception as e:
+        report(False, "Likes next_href pagination extracts correctly", str(e))
+
+    # Test: Playlist collection with wrappers & track stubs
+    playlist_collection_json = '''{
+        "collection": [
+            {
+                "playlist": {
+                    "id": 901,
+                    "title": "Wrapped Playlist",
+                    "tracks": [{"id": 1}, {"id": 2}]
+                }
+            },
+            {
+                "system_playlist": {
+                    "id": 902,
+                    "title": "System Playlist"
+                }
+            },
+            {
+                "id": 903,
+                "title": "Direct Playlist"
+            }
+        ],
+        "next_href": "https://api-v2.soundcloud.com/users/1/playlists/liked_and_owned?offset=3"
+    }'''
+    try:
+        pl_obj = json.loads(playlist_collection_json)
+        playlists = []
+        for item in pl_obj.get("collection", []):
+            if "playlist" in item:
+                playlists.append(item["playlist"])
+            elif "system_playlist" in item:
+                playlists.append(item["system_playlist"])
+            elif "id" in item:
+                playlists.append(item)
+        ok = len(playlists) == 3 and pl_obj.get("next_href") is not None
+        report(ok, "Playlists collection wrappers extract correctly")
+    except Exception as e:
+        report(False, "Playlists collection wrappers extract correctly", str(e))
+
 # ─── Check 8: Mach-O Weak Linking Audit (if binary exists) ───────────────────
 
 def check_macho_weak_links():

@@ -52,6 +52,8 @@ final class AudioPlayerEngine: ObservableObject {
     private var sleepTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private var artworkImage: UIImage?
+    private var currentLoadTask: Task<Void, Never>?
+    private var currentArtworkTask: Task<Void, Never>?
 
     /// Guards against running heavy setup more than once
     private var isSetup: Bool = false
@@ -71,6 +73,10 @@ final class AudioPlayerEngine: ObservableObject {
     }
 
     deinit {
+        currentLoadTask?.cancel()
+        currentLoadTask = nil
+        currentArtworkTask?.cancel()
+        currentArtworkTask = nil
         sleepTimer?.invalidate()
         sleepTimer = nil
         if let observer = timeObserver {
@@ -127,6 +133,26 @@ final class AudioPlayerEngine: ObservableObject {
     func play(track: Track) {
         setupIfNeeded()
 
+        // 1. Cancel any active loading/stream resolution tasks
+        currentLoadTask?.cancel()
+        currentLoadTask = nil
+        currentArtworkTask?.cancel()
+        currentArtworkTask = nil
+
+        // 2. Immediately stop current playback to avoid race conditions or old audio persisting
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        cancellables.removeAll()
+        playerItem = nil
+
+        // 3. Keep queue and currentIndex synchronized
+        if let idx = queue.firstIndex(where: { $0.id == track.id }) {
+            currentIndex = idx
+        } else {
+            queue = [track]
+            currentIndex = 0
+        }
+
         let updateState = { [weak self] in
             guard let self = self else { return }
             self.currentTrack = track
@@ -135,6 +161,7 @@ final class AudioPlayerEngine: ObservableObject {
             self.duration = track.durationInSeconds
             self.bufferedTime = 0
             self.artworkImage = nil
+            self.updateNowPlayingInfo(track: track)
         }
 
         if Thread.isMainThread {
@@ -146,15 +173,19 @@ final class AudioPlayerEngine: ObservableObject {
         LibraryManager.shared.addToRecentlyPlayed(track: track)
         fetchArtworkForNowPlaying(track: track)
 
-        Task { [weak self] in
+        currentLoadTask = Task { [weak self] in
             guard let self = self else { return }
             do {
                 let streamURL = try await self.api.resolveStreamURL(for: track)
+                if Task.isCancelled { return }
                 await MainActor.run {
+                    guard !Task.isCancelled else { return }
                     self.startPlayback(url: streamURL, track: track)
                 }
             } catch {
+                if Task.isCancelled { return }
                 await MainActor.run {
+                    guard !Task.isCancelled else { return }
                     self.playbackState = .failed(error.localizedDescription)
                 }
             }
@@ -297,6 +328,10 @@ final class AudioPlayerEngine: ObservableObject {
     }
 
     func stop() {
+        currentLoadTask?.cancel()
+        currentLoadTask = nil
+        currentArtworkTask?.cancel()
+        currentArtworkTask = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
         cancellables.removeAll()
@@ -338,7 +373,17 @@ final class AudioPlayerEngine: ObservableObject {
     }
 
     func nextTrack() {
-        guard !queue.isEmpty else { return }
+        currentLoadTask?.cancel()
+        currentLoadTask = nil
+
+        guard currentTrack != nil || !queue.isEmpty else { return }
+
+        // If queue is empty but a track was played standalone, initialize queue
+        if queue.isEmpty, let current = currentTrack {
+            queue = [current]
+            currentIndex = 0
+        }
+
         if isShuffleEnabled && queue.count > 1 {
             var randomIndex = Int.random(in: 0..<queue.count)
             if randomIndex == currentIndex {
@@ -353,17 +398,81 @@ final class AudioPlayerEngine: ObservableObject {
         if nextIndex < queue.count {
             currentIndex = nextIndex
             play(track: queue[nextIndex])
-        } else if isRepeatEnabled {
+        } else if isRepeatEnabled && !queue.isEmpty {
             currentIndex = 0
             play(track: queue[0])
         } else {
-            currentIndex = 0
-            pause()
-            seek(to: 0)
+            // Reached the end of queue or single track: fetch related / recommended tracks
+            guard let current = currentTrack ?? queue.last else { return }
+
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+            cancellables.removeAll()
+            playerItem = nil
+            playbackState = .loading
+
+            currentLoadTask = Task { [weak self] in
+                guard let self = self else { return }
+                var newTracks: [Track] = []
+
+                // Attempt 1: Fetch related tracks
+                if let related = try? await self.api.getRelatedTracks(trackID: current.id, limit: 10) {
+                    let existingIDs = Set(self.queue.map { $0.id })
+                    newTracks = related.filter { !existingIDs.contains($0.id) }
+                }
+
+                if Task.isCancelled { return }
+
+                // Attempt 2: If related tracks empty, fallback search by genre or artist
+                if newTracks.isEmpty {
+                    let query = current.genre ?? current.user?.username ?? "Chill Hits"
+                    if let searchRes = try? await self.api.searchTracks(query: query, limit: 10, offset: 0) {
+                        let existingIDs = Set(self.queue.map { $0.id })
+                        newTracks = searchRes.collection.filter { !existingIDs.contains($0.id) }
+                    }
+                }
+
+                if Task.isCancelled { return }
+
+                // Attempt 3: If still empty, search popular tracks ("Top Hits")
+                if newTracks.isEmpty {
+                    if let searchRes = try? await self.api.searchTracks(query: "Top Hits", limit: 10, offset: 0) {
+                        let existingIDs = Set(self.queue.map { $0.id })
+                        newTracks = searchRes.collection.filter { !existingIDs.contains($0.id) }
+                    }
+                }
+
+                if Task.isCancelled { return }
+
+                let tracksToEnqueue = newTracks
+                await MainActor.run {
+                    guard !Task.isCancelled else { return }
+                    if !tracksToEnqueue.isEmpty {
+                        for t in tracksToEnqueue {
+                            self.enqueue(t)
+                        }
+                        let playIndex = self.currentIndex + 1
+                        if playIndex < self.queue.count {
+                            self.currentIndex = playIndex
+                            self.play(track: self.queue[playIndex])
+                        }
+                    } else if self.queue.count > 1 {
+                        // Loop back to start of queue
+                        self.currentIndex = 0
+                        self.play(track: self.queue[0])
+                    } else {
+                        // Replay current track from start
+                        self.play(track: current)
+                    }
+                }
+            }
         }
     }
 
     func previousTrack() {
+        currentLoadTask?.cancel()
+        currentLoadTask = nil
+
         if currentTime > 3.0 {
             seek(to: 0)
             return
@@ -419,42 +528,9 @@ final class AudioPlayerEngine: ObservableObject {
             resume()
             return
         }
-        if currentIndex + 1 < queue.count || isShuffleEnabled {
-            nextTrack()
-        } else if AppSettings.shared.autoPlayRelated, let current = currentTrack {
-            Task {
-                var newTracks: [Track] = []
-                // Attempt 1: Fetch related tracks
-                if let related = try? await api.getRelatedTracks(trackID: current.id, limit: 10) {
-                    let existingIDs = Set(self.queue.map { $0.id })
-                    let filtered = related.filter { !existingIDs.contains($0.id) }
-                    newTracks = filtered
-                }
-                // Attempt 2: If related tracks empty, fallback search by genre or artist
-                if newTracks.isEmpty {
-                    let query = current.genre ?? current.user?.username ?? "Chill Hits"
-                    if let searchRes = try? await api.searchTracks(query: query, limit: 10, offset: 0) {
-                        let existingIDs = Set(self.queue.map { $0.id })
-                        newTracks = searchRes.collection.filter { !existingIDs.contains($0.id) }
-                    }
-                }
 
-                if !newTracks.isEmpty {
-                    let tracksToEnqueue = newTracks
-                    await MainActor.run {
-                        for t in tracksToEnqueue {
-                            self.enqueue(t)
-                        }
-                        self.nextTrack()
-                    }
-                } else {
-                    await MainActor.run {
-                        self.playbackState = .paused
-                        self.currentTime = self.duration
-                        self.updateNowPlayingElapsedTime()
-                    }
-                }
-            }
+        if currentIndex + 1 < queue.count || isShuffleEnabled || AppSettings.shared.autoPlayRelated {
+            nextTrack()
         } else {
             playbackState = .paused
             currentTime = duration
@@ -620,12 +696,14 @@ final class AudioPlayerEngine: ObservableObject {
     private func fetchArtworkForNowPlaying(track: Track) {
         guard let artworkURL = track.highResArtworkURL else { return }
 
-        Task { [weak self] in
+        currentArtworkTask = Task { [weak self] in
             guard let self = self else { return }
             do {
                 let (data, _) = try await URLSession.shared.data(from: artworkURL)
+                if Task.isCancelled { return }
                 guard let image = UIImage(data: data) else { return }
                 await MainActor.run {
+                    guard !Task.isCancelled else { return }
                     self.artworkImage = image
                     if self.currentTrack?.id == track.id {
                         self.updateNowPlayingInfo(track: track)
@@ -663,7 +741,7 @@ final class AudioPlayerEngine: ObservableObject {
         center.nextTrackCommand.isEnabled = true
         center.nextTrackCommand.addTarget { [weak self] _ in
             guard let self = self else { return .commandFailed }
-            if !self.queue.isEmpty {
+            if self.currentTrack != nil || !self.queue.isEmpty {
                 self.nextTrack()
                 return .success
             }
@@ -702,9 +780,12 @@ final class AudioPlayerEngine: ObservableObject {
         return min(bufferedTime / duration, 1.0)
     }
 
-    /// Whether there is a next track in the queue.
+    /// Whether there is a next track in the queue or available via autoPlayRelated / repeat / recommendation.
     var hasNextTrack: Bool {
-        !queue.isEmpty && currentIndex + 1 < queue.count
+        if queue.count > 1 && currentIndex + 1 < queue.count {
+            return true
+        }
+        return currentTrack != nil || !queue.isEmpty
     }
 
     /// Whether there is a previous track in the queue (or current time > 3s to restart).

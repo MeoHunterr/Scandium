@@ -394,4 +394,151 @@ final class ScandiumTests: XCTestCase {
             XCTFail("Should be .noClientID")
         }
     }
+
+    // MARK: - 9. Pagination & Resilient Decoder Tests
+
+    func testDecodeLikesPageWithNextHref() throws {
+        let json = """
+        {
+            "collection": [
+                {
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "track": {
+                        "id": 1001,
+                        "title": "Liked Track 1",
+                        "duration": 180000
+                    }
+                },
+                {
+                    "created_at": "2024-01-01T00:01:00Z",
+                    "track": {
+                        "id": 1002,
+                        "title": "Liked Track 2",
+                        "duration": 210000
+                    }
+                }
+            ],
+            "next_href": "https://api-v2.soundcloud.com/me/likes/tracks?offset=2&limit=50"
+        }
+        """.data(using: .utf8)!
+
+        let (tracks, nextHref) = SoundCloudAPI.parseLikesPage(from: json)
+        XCTAssertEqual(tracks.count, 2)
+        XCTAssertEqual(tracks[0].id, 1001)
+        XCTAssertEqual(tracks[0].title, "Liked Track 1")
+        XCTAssertEqual(tracks[1].id, 1002)
+        XCTAssertEqual(tracks[1].title, "Liked Track 2")
+        XCTAssertEqual(nextHref, "https://api-v2.soundcloud.com/me/likes/tracks?offset=2&limit=50")
+    }
+
+    func testDecodePlaylistsPageWithWrappersAndNextHref() throws {
+        let json = """
+        {
+            "collection": [
+                {
+                    "playlist": {
+                        "id": 2001,
+                        "title": "My Favorite Playlist",
+                        "description": "Chill vibes",
+                        "duration": 540000,
+                        "track_count": 3,
+                        "tracks": [
+                            {"id": 555}
+                        ]
+                    }
+                },
+                {
+                    "system_playlist": {
+                        "id": 2002,
+                        "title": "Weekly Mix",
+                        "track_count": 10
+                    }
+                },
+                {
+                    "id": 2003,
+                    "title": "Direct Playlist",
+                    "track_count": 5
+                }
+            ],
+            "next_href": "https://api-v2.soundcloud.com/users/123/playlists/liked_and_owned?offset=3&limit=50"
+        }
+        """.data(using: .utf8)!
+
+        let (playlists, nextHref) = SoundCloudAPI.parsePlaylistsPage(from: json)
+        XCTAssertEqual(playlists.count, 3)
+        XCTAssertEqual(playlists[0].id, 2001)
+        XCTAssertEqual(playlists[0].title, "My Favorite Playlist")
+        XCTAssertEqual(playlists[1].id, 2002)
+        XCTAssertEqual(playlists[1].title, "Weekly Mix")
+        XCTAssertEqual(playlists[2].id, 2003)
+        XCTAssertEqual(playlists[2].title, "Direct Playlist")
+        XCTAssertEqual(nextHref, "https://api-v2.soundcloud.com/users/123/playlists/liked_and_owned?offset=3&limit=50")
+    }
+
+    func testDecodePlaylistWithIncompleteTrackStubsDoesNotFail() throws {
+        let json = """
+        {
+            "id": 3001,
+            "title": "Stub Tracks Playlist",
+            "track_count": 4,
+            "tracks": [
+                {"id": 9991},
+                {"id": 9992, "monetization_model": "NOT_APPLICABLE"},
+                {
+                    "id": 9993,
+                    "title": "Full Track",
+                    "duration": 120000
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let playlist = try JSONDecoder().decode(SoundCloudPlaylist.self, from: json)
+        XCTAssertEqual(playlist.id, 3001)
+        XCTAssertEqual(playlist.title, "Stub Tracks Playlist")
+        // Stubs without title/duration are ignored, while full tracks are preserved
+        XCTAssertEqual(playlist.tracks?.count, 1)
+        XCTAssertEqual(playlist.tracks?.first?.id, 9993)
+        XCTAssertEqual(playlist.tracks?.first?.title, "Full Track")
+    }
+
+    // MARK: - 10. Queue & Next Track Behavior Tests
+
+    func testAudioPlayerEngineHasNextTrack() {
+        let scraper = ClientIDScraper()
+        let api = SoundCloudAPI(scraper: scraper)
+        let player = AudioPlayerEngine(api: api)
+
+        let t1 = Track(
+            id: 1, title: "Track 1", description: nil, duration: 100000,
+            fullDuration: nil, genre: nil, tagList: nil, artworkURL: nil,
+            waveformURL: nil, streamable: true, downloadable: false,
+            playbackCount: 0, likesCount: 0, repostsCount: 0, commentCount: 0,
+            permalinkURL: nil, permalink: nil, uri: nil, urn: nil,
+            kind: "track", createdAt: nil, lastModified: nil,
+            user: nil, media: nil, publisherMetadata: nil,
+            stationURN: nil, stationPermalink: nil
+        )
+        let t2 = Track(
+            id: 2, title: "Track 2", description: nil, duration: 120000,
+            fullDuration: nil, genre: nil, tagList: nil, artworkURL: nil,
+            waveformURL: nil, streamable: true, downloadable: false,
+            playbackCount: 0, likesCount: 0, repostsCount: 0, commentCount: 0,
+            permalinkURL: nil, permalink: nil, uri: nil, urn: nil,
+            kind: "track", createdAt: nil, lastModified: nil,
+            user: nil, media: nil, publisherMetadata: nil,
+            stationURN: nil, stationPermalink: nil
+        )
+
+        // Empty player has no next track
+        XCTAssertFalse(player.hasNextTrack)
+
+        // Queue with 2 tracks has next track
+        player.queue = [t1, t2]
+        XCTAssertTrue(player.hasNextTrack)
+
+        // Moving to last track still allows next track via recommendation/wrap
+        player.play(at: 1)
+        XCTAssertTrue(player.hasNextTrack)
+    }
 }

@@ -212,38 +212,71 @@ final class SoundCloudAuthManager: ObservableObject {
     private func syncLibraryInternal(token: String?, user: SoundCloudUser) async {
         guard let api = api else { return }
 
-        var likes: [Track] = []
-        if let token = token, !token.isEmpty {
-            do {
-                likes = try await api.getMeLikesTracks(oauthToken: token, limit: 50)
-            } catch {
-                likes = (try? await api.getUserLikes(userID: user.id, oauthToken: token, limit: 50)) ?? []
+        // 1. Liked Tracks Incremental Sync
+        var isFirstLikesPage = true
+        var allLikesIDs = Set<Int>()
+
+        let onLikesPage: ([Track]) async -> Void = { [weak self] pageTracks in
+            guard let self = self else { return }
+            let isFirst = isFirstLikesPage
+            isFirstLikesPage = false
+            for t in pageTracks {
+                allLikesIDs.insert(t.id)
             }
-        } else {
-            likes = (try? await api.getUserLikes(userID: user.id, oauthToken: nil, limit: 50)) ?? []
+            await MainActor.run {
+                LibraryManager.shared.syncLikedTracksIncremental(pageTracks: pageTracks, isFirstPage: isFirst)
+                self.userLikedTracks = LibraryManager.shared.likedTracks
+                self.savePersistedState()
+            }
         }
 
-        var playlists: [SoundCloudPlaylist] = []
         if let token = token, !token.isEmpty {
             do {
-                playlists = try await api.getMePlaylists(oauthToken: token)
+                _ = try await api.getMeLikesTracks(oauthToken: token, limit: 50, onPage: onLikesPage)
             } catch {
-                playlists = (try? await api.getUserPlaylists(userID: user.id, oauthToken: token)) ?? []
+                _ = try? await api.getUserLikes(userID: user.id, oauthToken: token, limit: 50, onPage: onLikesPage)
             }
         } else {
-            playlists = (try? await api.getUserPlaylists(userID: user.id, oauthToken: nil)) ?? []
+            _ = try? await api.getUserLikes(userID: user.id, oauthToken: nil, limit: 50, onPage: onLikesPage)
         }
 
+        if !allLikesIDs.isEmpty {
+            LibraryManager.shared.finalizeLikedTracksSync(syncedIDs: allLikesIDs)
+            self.userLikedTracks = LibraryManager.shared.likedTracks
+            self.savePersistedState()
+        }
+
+        // 2. Playlists Incremental Sync
+        var accumulatedPlaylists: [SoundCloudPlaylist] = []
+        var seenPlaylistIDs = Set<Int>()
+
+        let onPlaylistPage: ([SoundCloudPlaylist]) async -> Void = { [weak self] page in
+            guard let self = self else { return }
+            await MainActor.run {
+                for pl in page {
+                    if seenPlaylistIDs.insert(pl.id).inserted {
+                        accumulatedPlaylists.append(pl)
+                    }
+                }
+                self.userPlaylists = accumulatedPlaylists
+                self.userAlbums = accumulatedPlaylists.filter {
+                    ($0.trackCount ?? 0) >= 5 ||
+                    ($0.title.lowercased().contains("album") || $0.title.lowercased().contains("ep"))
+                }
+                LibraryManager.shared.syncUserPlaylists(accumulatedPlaylists)
+                self.savePersistedState()
+            }
+        }
+
+        if let token = token, !token.isEmpty {
+            _ = try? await api.getMePlaylists(oauthToken: token, userID: user.id, limit: 50, onPage: onPlaylistPage)
+        } else {
+            _ = try? await api.getUserPlaylists(userID: user.id, oauthToken: nil, limit: 50, onPage: onPlaylistPage)
+        }
+
+        // 3. User Followings
         let followings = (try? await api.getUserFollowings(userID: user.id, oauthToken: token, limit: 30)) ?? []
-
-        let uniqueLikes = deduplicateTracks(likes)
-        self.userLikedTracks = uniqueLikes
-        self.userPlaylists = playlists
-        self.userAlbums = playlists.filter { ($0.trackCount ?? 0) >= 5 || ($0.title.lowercased().contains("album") || $0.title.lowercased().contains("ep")) }
         self.userFollowings = followings
-
-        LibraryManager.shared.syncLikedTracks(uniqueLikes)
-        LibraryManager.shared.syncUserPlaylists(playlists)
 
         self.savePersistedState()
     }

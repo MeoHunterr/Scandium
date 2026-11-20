@@ -41,8 +41,8 @@ struct FloatingMiniPlayer: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
-                        // Right Controls: Heart + Play/Pause
-                        HStack(spacing: 16) {
+                        // Right Controls: Heart + Play/Pause + Next
+                        HStack(spacing: 12) {
                             // Minimal Heart
                             Button(action: {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
@@ -53,6 +53,8 @@ struct FloatingMiniPlayer: View {
                                 Image(systemName: isLiked ? "heart.fill" : "heart")
                                     .font(.system(size: 17, weight: .medium))
                                     .foregroundColor(isLiked ? ScandiumTheme.spotifyGreen : ScandiumTheme.subtext)
+                                    .frame(width: 28, height: 28)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(PlainButtonStyle())
 
@@ -64,6 +66,19 @@ struct FloatingMiniPlayer: View {
                                     .font(.system(size: 18, weight: .semibold))
                                     .foregroundColor(ScandiumTheme.textPrimary)
                                     .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PlainButtonStyle())
+
+                            // Minimal Next
+                            Button(action: {
+                                player.nextTrack()
+                            }) {
+                                Image(systemName: "forward.fill")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(ScandiumTheme.textPrimary)
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(PlainButtonStyle())
                         }

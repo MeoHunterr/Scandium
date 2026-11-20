@@ -110,103 +110,352 @@ final class SoundCloudAPI: ObservableObject {
         )
     }
 
-    /// Fetches the authenticated user's liked tracks via /me/likes/tracks
-    func getMeLikesTracks(oauthToken: String, limit: Int = 50) async throws -> [Track] {
-        let clientID = try await scraper.getClientID()
-        let urlString = "\(Self.baseURL)/me/likes/tracks?client_id=\(clientID)&limit=\(limit)"
-        let headers = ["Authorization": "OAuth \(oauthToken)"]
+    // MARK: - Likes Pagination & Decoding
 
-        let data = try await performRawRequest(urlString: urlString, headers: headers)
-        if let direct = try? JSONDecoder().decode(SearchResponse.self, from: data) {
-            return direct.collection
-        }
-
-        struct LikeWrapper: Codable {
+    /// Decodes a page of liked tracks from raw data, safely handling wrapped and direct formats.
+    static func parseLikesPage(from data: Data) -> (tracks: [Track], nextHref: String?) {
+        struct LikeItem: Decodable {
             let track: Track?
+
+            enum CodingKeys: String, CodingKey {
+                case track
+            }
+
+            init(from decoder: Decoder) throws {
+                if let container = try? decoder.container(keyedBy: CodingKeys.self),
+                   let t = try? container.decodeIfPresent(Track.self, forKey: .track) {
+                    self.track = t
+                    return
+                }
+                if let t = try? Track(from: decoder) {
+                    self.track = t
+                    return
+                }
+                self.track = nil
+            }
         }
-        struct LikesResponse: Codable {
-            let collection: [LikeWrapper]
+
+        struct LikesEnvelope: Decodable {
+            let collection: [LikeItem]
+            let nextHref: String?
+
+            enum CodingKeys: String, CodingKey {
+                case collection
+                case nextHref = "next_href"
+            }
         }
-        if let wrapped = try? JSONDecoder().decode(LikesResponse.self, from: data) {
-            return wrapped.collection.compactMap { $0.track }
+
+        if let env = try? JSONDecoder().decode(LikesEnvelope.self, from: data) {
+            let tracks = env.collection.compactMap { $0.track }
+            return (tracks, env.nextHref)
+        }
+
+        if let direct = try? JSONDecoder().decode(SearchResponse.self, from: data) {
+            return (direct.collection, direct.nextHref)
         }
 
         if let tracks = try? JSONDecoder().decode([Track].self, from: data) {
-            return tracks
+            return (tracks, nil)
         }
 
-        return []
+        return ([], nil)
     }
 
-    /// Fetches the authenticated user's playlists via /me/playlists
-    func getMePlaylists(oauthToken: String, limit: Int = 30) async throws -> [SoundCloudPlaylist] {
-        let clientID = try await scraper.getClientID()
-        let urlString = "\(Self.baseURL)/me/playlists?client_id=\(clientID)&limit=\(limit)"
-        let headers = ["Authorization": "OAuth \(oauthToken)"]
-
-        struct PlaylistCollection: Codable {
-            let collection: [SoundCloudPlaylist]
+    /// Fetches a single page of liked tracks from urlString
+    func fetchLikesPage(
+        urlString: String,
+        oauthToken: String?
+    ) async throws -> (tracks: [Track], nextHref: String?) {
+        var finalURL = urlString
+        if !finalURL.contains("client_id=") {
+            let clientID = try await scraper.getClientID()
+            let separator = finalURL.contains("?") ? "&" : "?"
+            finalURL += "\(separator)client_id=\(clientID)"
         }
 
-        let data = try await performRawRequest(urlString: urlString, headers: headers)
-        if let col = try? JSONDecoder().decode(PlaylistCollection.self, from: data) {
-            return col.collection
-        }
-        if let arr = try? JSONDecoder().decode([SoundCloudPlaylist].self, from: data) {
-            return arr
-        }
-        return []
-    }
-
-    /// Fetches a user's liked tracks
-    func getUserLikes(userID: Int, oauthToken: String? = nil, limit: Int = 50) async throws -> [Track] {
-        let clientID = try await scraper.getClientID()
-        let urlString = "\(Self.baseURL)/users/\(userID)/likes?client_id=\(clientID)&limit=\(limit)"
         var headers: [String: String]? = nil
         if let token = oauthToken, !token.isEmpty {
             headers = ["Authorization": "OAuth \(token)"]
         }
 
-        // Try decoding as collection of items with embedded track or direct tracks
-        let data = try await performRawRequest(urlString: urlString, headers: headers)
-        if let direct = try? JSONDecoder().decode(SearchResponse.self, from: data) {
-            return direct.collection
-        }
-
-        struct LikeWrapper: Codable {
-            let track: Track?
-        }
-        struct LikesResponse: Codable {
-            let collection: [LikeWrapper]
-        }
-        if let wrapped = try? JSONDecoder().decode(LikesResponse.self, from: data) {
-            return wrapped.collection.compactMap { $0.track }
-        }
-
-        return []
+        let data = try await performRawRequest(urlString: finalURL, headers: headers)
+        return Self.parseLikesPage(from: data)
     }
 
-    /// Fetches a user's public playlists
-    func getUserPlaylists(userID: Int, oauthToken: String? = nil) async throws -> [SoundCloudPlaylist] {
+    /// Fetches all liked tracks with pagination following `next_href`.
+    /// Emits each page via `onPage` to support incremental syncing.
+    func fetchAllLikes(
+        initialURL: String,
+        oauthToken: String?,
+        delayNanoseconds: UInt64 = 120_000_000,
+        onPage: (([Track]) async -> Void)? = nil
+    ) async throws -> [Track] {
+        var allTracks: [Track] = []
+        var nextURL: String? = initialURL
+        var visitedURLs = Set<String>()
+
+        while let currentURL = nextURL, !currentURL.isEmpty {
+            if visitedURLs.contains(currentURL) {
+                break
+            }
+            visitedURLs.insert(currentURL)
+
+            let (pageTracks, nextHref) = try await fetchLikesPage(
+                urlString: currentURL,
+                oauthToken: oauthToken
+            )
+
+            if !pageTracks.isEmpty {
+                allTracks.append(contentsOf: pageTracks)
+                if let onPage = onPage {
+                    await onPage(pageTracks)
+                }
+            }
+
+            guard let next = nextHref, !next.isEmpty else {
+                break
+            }
+            nextURL = next
+
+            if delayNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: delayNanoseconds)
+            }
+        }
+
+        return allTracks
+    }
+
+    /// Fetches the authenticated user's liked tracks via /me/likes/tracks with pagination
+    func getMeLikesTracks(
+        oauthToken: String,
+        limit: Int = 50,
+        onPage: (([Track]) async -> Void)? = nil
+    ) async throws -> [Track] {
         let clientID = try await scraper.getClientID()
-        let urlString = "\(Self.baseURL)/users/\(userID)/playlists?client_id=\(clientID)&limit=20"
+        let initialURL = "\(Self.baseURL)/me/likes/tracks?client_id=\(clientID)&limit=\(limit)&linked_partitioning=1"
+        return try await fetchAllLikes(
+            initialURL: initialURL,
+            oauthToken: oauthToken,
+            onPage: onPage
+        )
+    }
+
+    /// Fetches a user's liked tracks with pagination
+    func getUserLikes(
+        userID: Int,
+        oauthToken: String? = nil,
+        limit: Int = 50,
+        onPage: (([Track]) async -> Void)? = nil
+    ) async throws -> [Track] {
+        let clientID = try await scraper.getClientID()
+        let initialURL = "\(Self.baseURL)/users/\(userID)/likes?client_id=\(clientID)&limit=\(limit)&linked_partitioning=1"
+        return try await fetchAllLikes(
+            initialURL: initialURL,
+            oauthToken: oauthToken,
+            onPage: onPage
+        )
+    }
+
+    // MARK: - Playlists Pagination & Decoding
+
+    /// Decodes a page of playlists from raw data, safely handling wrapped and direct formats.
+    static func parsePlaylistsPage(from data: Data) -> (playlists: [SoundCloudPlaylist], nextHref: String?) {
+        struct PlaylistItem: Decodable {
+            let playlist: SoundCloudPlaylist?
+
+            enum CodingKeys: String, CodingKey {
+                case playlist
+                case systemPlaylist = "system_playlist"
+            }
+
+            init(from decoder: Decoder) throws {
+                if let container = try? decoder.container(keyedBy: CodingKeys.self) {
+                    if let p = try? container.decodeIfPresent(SoundCloudPlaylist.self, forKey: .playlist) {
+                        self.playlist = p
+                        return
+                    }
+                    if let sp = try? container.decodeIfPresent(SoundCloudPlaylist.self, forKey: .systemPlaylist) {
+                        self.playlist = sp
+                        return
+                    }
+                }
+                if let p = try? SoundCloudPlaylist(from: decoder) {
+                    self.playlist = p
+                    return
+                }
+                self.playlist = nil
+            }
+        }
+
+        struct PlaylistsEnvelope: Decodable {
+            let collection: [PlaylistItem]
+            let nextHref: String?
+
+            enum CodingKeys: String, CodingKey {
+                case collection
+                case nextHref = "next_href"
+            }
+        }
+
+        if let env = try? JSONDecoder().decode(PlaylistsEnvelope.self, from: data) {
+            let playlists = env.collection.compactMap { $0.playlist }
+            return (playlists, env.nextHref)
+        }
+
+        struct DirectCollection: Decodable {
+            let collection: [SoundCloudPlaylist]
+            let nextHref: String?
+
+            enum CodingKeys: String, CodingKey {
+                case collection
+                case nextHref = "next_href"
+            }
+        }
+
+        if let direct = try? JSONDecoder().decode(DirectCollection.self, from: data) {
+            return (direct.collection, direct.nextHref)
+        }
+
+        if let arr = try? JSONDecoder().decode([SoundCloudPlaylist].self, from: data) {
+            return (arr, nil)
+        }
+
+        return ([], nil)
+    }
+
+    /// Fetches a single page of playlists from urlString
+    func fetchPlaylistsPage(
+        urlString: String,
+        oauthToken: String?
+    ) async throws -> (playlists: [SoundCloudPlaylist], nextHref: String?) {
+        var finalURL = urlString
+        if !finalURL.contains("client_id=") {
+            let clientID = try await scraper.getClientID()
+            let separator = finalURL.contains("?") ? "&" : "?"
+            finalURL += "\(separator)client_id=\(clientID)"
+        }
+
         var headers: [String: String]? = nil
         if let token = oauthToken, !token.isEmpty {
             headers = ["Authorization": "OAuth \(token)"]
         }
 
-        struct PlaylistCollection: Codable {
-            let collection: [SoundCloudPlaylist]
+        let data = try await performRawRequest(urlString: finalURL, headers: headers)
+        return Self.parsePlaylistsPage(from: data)
+    }
+
+    /// Fetches all playlists with pagination following `next_href`.
+    /// Emits each page via `onPage` to support incremental syncing.
+    func fetchAllPlaylists(
+        initialURL: String,
+        oauthToken: String?,
+        delayNanoseconds: UInt64 = 120_000_000,
+        onPage: (([SoundCloudPlaylist]) async -> Void)? = nil
+    ) async throws -> [SoundCloudPlaylist] {
+        var allPlaylists: [SoundCloudPlaylist] = []
+        var nextURL: String? = initialURL
+        var visitedURLs = Set<String>()
+
+        while let currentURL = nextURL, !currentURL.isEmpty {
+            if visitedURLs.contains(currentURL) {
+                break
+            }
+            visitedURLs.insert(currentURL)
+
+            let (pagePlaylists, nextHref) = try await fetchPlaylistsPage(
+                urlString: currentURL,
+                oauthToken: oauthToken
+            )
+
+            if !pagePlaylists.isEmpty {
+                allPlaylists.append(contentsOf: pagePlaylists)
+                if let onPage = onPage {
+                    await onPage(pagePlaylists)
+                }
+            }
+
+            guard let next = nextHref, !next.isEmpty else {
+                break
+            }
+            nextURL = next
+
+            if delayNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: delayNanoseconds)
+            }
         }
 
-        let data = try await performRawRequest(urlString: urlString, headers: headers)
-        if let col = try? JSONDecoder().decode(PlaylistCollection.self, from: data) {
-            return col.collection
+        return allPlaylists
+    }
+
+    /// Fetches the authenticated user's playlists (public, private, liked)
+    func getMePlaylists(
+        oauthToken: String,
+        userID: Int? = nil,
+        limit: Int = 50,
+        onPage: (([SoundCloudPlaylist]) async -> Void)? = nil
+    ) async throws -> [SoundCloudPlaylist] {
+        let clientID = try await scraper.getClientID()
+
+        // 1. If userID is available, fetch liked_and_owned with OAuth header
+        // This endpoint returns owned (public & private) + liked playlists!
+        if let uid = userID {
+            let likedAndOwnedURL = "\(Self.baseURL)/users/\(uid)/playlists/liked_and_owned?client_id=\(clientID)&limit=\(limit)&linked_partitioning=1"
+            do {
+                let results = try await fetchAllPlaylists(
+                    initialURL: likedAndOwnedURL,
+                    oauthToken: oauthToken,
+                    onPage: onPage
+                )
+                if !results.isEmpty {
+                    return results
+                }
+            } catch {
+                print("[SoundCloudAPI] liked_and_owned error: \(error.localizedDescription)")
+            }
         }
-        if let arr = try? JSONDecoder().decode([SoundCloudPlaylist].self, from: data) {
-            return arr
+
+        // 2. Try /me/playlists
+        let mePlaylistsURL = "\(Self.baseURL)/me/playlists?client_id=\(clientID)&limit=\(limit)&linked_partitioning=1"
+        do {
+            let results = try await fetchAllPlaylists(
+                initialURL: mePlaylistsURL,
+                oauthToken: oauthToken,
+                onPage: onPage
+            )
+            if !results.isEmpty {
+                return results
+            }
+        } catch {
+            print("[SoundCloudAPI] /me/playlists error: \(error.localizedDescription)")
         }
+
+        // 3. Fallback to /users/{uid}/playlists
+        if let uid = userID {
+            let userPlaylistsURL = "\(Self.baseURL)/users/\(uid)/playlists?client_id=\(clientID)&limit=\(limit)&linked_partitioning=1"
+            return try await fetchAllPlaylists(
+                initialURL: userPlaylistsURL,
+                oauthToken: oauthToken,
+                onPage: onPage
+            )
+        }
+
         return []
+    }
+
+    /// Fetches a user's playlists with pagination
+    func getUserPlaylists(
+        userID: Int,
+        oauthToken: String? = nil,
+        limit: Int = 50,
+        onPage: (([SoundCloudPlaylist]) async -> Void)? = nil
+    ) async throws -> [SoundCloudPlaylist] {
+        let clientID = try await scraper.getClientID()
+        let urlString = "\(Self.baseURL)/users/\(userID)/playlists?client_id=\(clientID)&limit=\(limit)&linked_partitioning=1"
+        return try await fetchAllPlaylists(
+            initialURL: urlString,
+            oauthToken: oauthToken,
+            onPage: onPage
+        )
     }
 
     /// Fetches a specific playlist and its tracks
@@ -253,12 +502,20 @@ final class SoundCloudAPI: ObservableObject {
         let clientID = try await scraper.getClientID()
         let urlString = "\(Self.baseURL)/tracks/\(trackID)/related?client_id=\(clientID)&limit=\(limit)"
 
-        let response = try await performRequest(
-            urlString: urlString,
-            decodeAs: SearchResponse.self,
-            retryCount: 0
-        )
-        return response.collection
+        let data = try await performRawRequest(urlString: urlString)
+        if let direct = try? JSONDecoder().decode(SearchResponse.self, from: data) {
+            return direct.collection
+        }
+        if let arr = try? JSONDecoder().decode([Track].self, from: data) {
+            return arr
+        }
+        struct RelatedWrapper: Decodable {
+            let collection: [Track]
+        }
+        if let wrapped = try? JSONDecoder().decode(RelatedWrapper.self, from: data) {
+            return wrapped.collection
+        }
+        return []
     }
 
     /// Fetches the authenticated user's stream / feed
@@ -351,7 +608,14 @@ final class SoundCloudAPI: ObservableObject {
     /// Resolves the direct stream URL for a track.
     /// Prioritizes progressive (direct MP3) over HLS for lower CPU overhead on legacy devices.
     func resolveStreamURL(for track: Track) async throws -> URL {
-        guard let transcodings = track.media?.transcodings, !transcodings.isEmpty else {
+        var currentTrack = track
+        if currentTrack.media?.transcodings.isEmpty ?? true {
+            if let full = try? await getTrack(id: track.id) {
+                currentTrack = full
+            }
+        }
+
+        guard let transcodings = currentTrack.media?.transcodings, !transcodings.isEmpty else {
             throw APIError.noTranscodings
         }
 

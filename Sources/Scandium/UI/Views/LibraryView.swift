@@ -200,7 +200,8 @@ struct LibraryView: View {
                         track: track,
                         isCurrentlyPlaying: player.currentTrack?.id == track.id,
                         onTap: {
-                            player.play(track: track)
+                            let idx = library.likedTracks.firstIndex(where: { $0.id == track.id }) ?? 0
+                            player.playQueue(library.likedTracks, startingAt: idx)
                         }
                     )
                 }
@@ -396,7 +397,8 @@ struct LibraryView: View {
                         track: track,
                         isCurrentlyPlaying: player.currentTrack?.id == track.id,
                         onTap: {
-                            player.play(track: track)
+                            let idx = library.recentlyPlayed.firstIndex(where: { $0.id == track.id }) ?? 0
+                            player.playQueue(library.recentlyPlayed, startingAt: idx)
                         }
                     )
                 }

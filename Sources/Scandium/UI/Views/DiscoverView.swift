@@ -180,8 +180,9 @@ struct DiscoverView: View {
                     }
                 }
             } else {
-                ForEach(Array(store.quickPicks.prefix(5).enumerated()), id: \.offset) { _, track in
-                    quickPickCard(track: track)
+                let picks = Array(store.quickPicks.prefix(5))
+                ForEach(Array(picks.enumerated()), id: \.offset) { _, track in
+                    quickPickCard(track: track, in: picks)
                 }
             }
         }
@@ -221,9 +222,10 @@ struct DiscoverView: View {
         .buttonStyle(PlainButtonStyle())
     }
 
-    private func quickPickCard(track: Track) -> some View {
+    private func quickPickCard(track: Track, in picks: [Track]) -> some View {
         Button(action: {
-            player.play(track: track)
+            let idx = picks.firstIndex(where: { $0.id == track.id }) ?? 0
+            player.playQueue(picks, startingAt: idx)
         }) {
             HStack(spacing: 8) {
                 CachedAsyncImage(
@@ -296,7 +298,7 @@ struct DiscoverView: View {
                         }
                     } else {
                         ForEach(Array(tracks.enumerated()), id: \.offset) { _, track in
-                            carouselCard(track: track)
+                            carouselCard(track: track, in: tracks)
                         }
                     }
                 }
@@ -304,9 +306,10 @@ struct DiscoverView: View {
         }
     }
 
-    private func carouselCard(track: Track) -> some View {
+    private func carouselCard(track: Track, in tracks: [Track]) -> some View {
         Button(action: {
-            player.play(track: track)
+            let idx = tracks.firstIndex(where: { $0.id == track.id }) ?? 0
+            player.playQueue(tracks, startingAt: idx)
         }) {
             VStack(alignment: .leading, spacing: 6) {
                 // Square 148x148 Artwork, 8pt corner radius, strictly clipped

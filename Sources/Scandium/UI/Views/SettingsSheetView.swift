@@ -643,13 +643,13 @@ struct SettingsSheetView: View {
 
                 HairlineDivider(leadingPadding: 16)
 
-                // Version 1.4.0
+                // Version 1.4.1
                 HStack {
                     Text(settings.loc("Phiên bản", "Version"))
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(ScandiumTheme.textPrimary)
                     Spacer()
-                    Text("1.4.0")
+                    Text("1.4.1")
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundColor(ScandiumTheme.spotifyGreen)
                 }

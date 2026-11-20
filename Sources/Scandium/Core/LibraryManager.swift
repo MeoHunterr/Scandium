@@ -196,6 +196,44 @@ final class LibraryManager: ObservableObject {
         }
     }
 
+    /// Incremental sync for liked tracks — called page-by-page as pages arrive from SoundCloud API.
+    func syncLikedTracksIncremental(pageTracks: [Track], isFirstPage: Bool) {
+        if isFirstPage {
+            var uniquePage: [Track] = []
+            var seen = Set<Int>()
+            for t in pageTracks {
+                if seen.insert(t.id).inserted {
+                    uniquePage.append(t)
+                }
+            }
+            let pageIDs = seen
+            let remaining = likedTracks.filter { !pageIDs.contains($0.id) }
+            likedTracks = uniquePage + remaining
+        } else {
+            var existingIDs = Set(likedTracks.map { $0.id })
+            var added: [Track] = []
+            for t in pageTracks {
+                if existingIDs.insert(t.id).inserted {
+                    added.append(t)
+                }
+            }
+            likedTracks.append(contentsOf: added)
+        }
+        let snapshot = likedTracks
+        dbQueue.async { self._insertLikedTracks(snapshot) }
+    }
+
+    /// Prunes any local liked tracks that were not returned during full sync
+    func finalizeLikedTracksSync(syncedIDs: Set<Int>) {
+        guard !syncedIDs.isEmpty else { return }
+        let filtered = likedTracks.filter { syncedIDs.contains($0.id) }
+        if filtered.count != likedTracks.count {
+            likedTracks = filtered
+            let snapshot = likedTracks
+            dbQueue.async { self._insertLikedTracks(snapshot) }
+        }
+    }
+
     /// Synchronizes user playlists from SoundCloud account
     func syncUserPlaylists(_ playlists: [SoundCloudPlaylist]) {
         self.userPlaylists = playlists
@@ -291,6 +329,7 @@ final class LibraryManager: ObservableObject {
     /// Replaces all rows in table with the given tracks (position = array index)
     private func _insertLikedTracks(_ tracks: [Track]) {
         guard let db = db else { return }
+        sqlite3_exec(db, "BEGIN TRANSACTION;", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM liked_tracks;", nil, nil, nil)
         let encoder = JSONEncoder()
         for (pos, track) in tracks.enumerated() {
@@ -308,11 +347,13 @@ final class LibraryManager: ObservableObject {
             }
             sqlite3_finalize(stmt)
         }
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
     }
 
     /// Replaces all rows in recently_played with the given tracks (position = array index)
     private func _insertRecentlyPlayed(_ tracks: [Track]) {
         guard let db = db else { return }
+        sqlite3_exec(db, "BEGIN TRANSACTION;", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM recently_played;", nil, nil, nil)
         let encoder = JSONEncoder()
         for (pos, track) in tracks.enumerated() {
@@ -330,11 +371,13 @@ final class LibraryManager: ObservableObject {
             }
             sqlite3_finalize(stmt)
         }
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
     }
 
     /// Replaces all rows in playlists with the given playlists
     private func _insertPlaylists(_ playlists: [SoundCloudPlaylist]) {
         guard let db = db else { return }
+        sqlite3_exec(db, "BEGIN TRANSACTION;", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM playlists;", nil, nil, nil)
         let encoder = JSONEncoder()
         for (pos, playlist) in playlists.enumerated() {
@@ -352,6 +395,7 @@ final class LibraryManager: ObservableObject {
             }
             sqlite3_finalize(stmt)
         }
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
     }
 
     private func _deleteTrack(id: Int, table: String) {
