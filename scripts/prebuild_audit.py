@@ -444,16 +444,14 @@ def check_incompatible_symbols():
         print(f"  {WARN} Binary not found — skipping (run build first)")
         return
 
+    import shutil
     import subprocess
-    llvm_nm_candidates = [
-        "/home/meohunter/.local/share/swiftly/bin/llvm-nm",
-        "llvm-nm",
-    ]
-    nm_bin = None
-    for cand in llvm_nm_candidates:
-        if os.path.exists(cand) or subprocess.run(["which", cand], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-            nm_bin = cand
-            break
+    nm_bin = shutil.which("llvm-nm")
+    if not nm_bin:
+        swiftly_home = os.environ.get("SWIFTLY_HOME_DIR") or os.path.join(os.path.expanduser("~"), ".local", "share", "swiftly")
+        candidate = os.path.join(swiftly_home, "bin", "llvm-nm")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            nm_bin = candidate
 
     if not nm_bin:
         print(f"  {WARN} llvm-nm not found — skipping symbol scan")

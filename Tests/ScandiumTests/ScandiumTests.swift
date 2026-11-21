@@ -504,6 +504,7 @@ final class ScandiumTests: XCTestCase {
 
     // MARK: - 10. Queue & Next Track Behavior Tests
 
+    @MainActor
     func testAudioPlayerEngineHasNextTrack() {
         let scraper = ClientIDScraper()
         let api = SoundCloudAPI(scraper: scraper)
@@ -540,5 +541,112 @@ final class ScandiumTests: XCTestCase {
         // Moving to last track still allows next track via recommendation/wrap
         player.play(at: 1)
         XCTAssertTrue(player.hasNextTrack)
+    }
+
+    // MARK: - 11. Partial Sync, Null-Resilient Playlist Decoder & Client ID Validation Tests
+
+    private func makeDummyTrack(id: Int, title: String) -> Track {
+        Track(
+            id: id, title: title, description: nil, duration: 120000,
+            fullDuration: 120000, genre: nil, tagList: nil, artworkURL: nil,
+            waveformURL: nil, streamable: true, downloadable: false,
+            playbackCount: 0, likesCount: 0, repostsCount: 0, commentCount: 0,
+            permalinkURL: nil, permalink: nil, uri: nil, urn: nil,
+            kind: "track", createdAt: nil, lastModified: nil,
+            user: nil, media: nil, publisherMetadata: nil,
+            stationURN: nil, stationPermalink: nil
+        )
+    }
+
+    func testPartialLikesSyncDoesNotDeleteLocalTracks() {
+        let manager = LibraryManager.shared
+        manager.clearAllData()
+
+        let existing1 = makeDummyTrack(id: 5001, title: "Existing 1")
+        let existing2 = makeDummyTrack(id: 5002, title: "Existing 2")
+        let localDuringSync = makeDummyTrack(id: 5003, title: "Liked During Sync")
+
+        manager.like(track: existing1)
+        manager.like(track: existing2)
+        XCTAssertTrue(manager.isLiked(track: existing1))
+        XCTAssertTrue(manager.isLiked(track: existing2))
+
+        // Start sync and deliver only page 1 (partial)
+        manager.beginLikesSync()
+        manager.syncLikedTracksIncremental(pageTracks: [existing1], isFirstPage: true)
+        manager.like(track: localDuringSync)
+
+        // Partial failure: completed == false MUST NOT prune existing2 or localDuringSync
+        manager.finalizeLikedTracksSync(syncedIDs: [existing1.id], completed: false)
+        XCTAssertTrue(manager.isLiked(track: existing1))
+        XCTAssertTrue(manager.isLiked(track: existing2))
+        XCTAssertTrue(manager.isLiked(track: localDuringSync))
+
+        // Full completion: completed == true prunes existing2 (not in remote) while keeping localDuringSync
+        manager.beginLikesSync()
+        manager.syncLikedTracksIncremental(pageTracks: [existing1], isFirstPage: true)
+        manager.like(track: localDuringSync)
+        manager.finalizeLikedTracksSync(syncedIDs: [existing1.id], completed: true)
+
+        XCTAssertTrue(manager.isLiked(track: existing1))
+        XCTAssertFalse(manager.isLiked(track: existing2))
+        XCTAssertTrue(manager.isLiked(track: localDuringSync))
+
+        manager.clearAllData()
+    }
+
+    func testDecodePlaylistWithNullAndMalformedTracksDoesNotHang() throws {
+        let json = """
+        {
+            "id": 4001,
+            "title": "Null & Malformed Tracks Playlist",
+            "track_count": 6,
+            "tracks": [
+                null,
+                "invalid_string_entry",
+                12345,
+                {"id": 9991},
+                {
+                    "id": 9994,
+                    "title": "Valid Track After Null",
+                    "duration": 185000
+                },
+                null
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let playlist = try JSONDecoder().decode(SoundCloudPlaylist.self, from: json)
+        XCTAssertEqual(playlist.id, 4001)
+        XCTAssertEqual(playlist.tracks?.count, 1)
+        XCTAssertEqual(playlist.tracks?.first?.id, 9994)
+        XCTAssertEqual(playlist.tracks?.first?.title, "Valid Track After Null")
+    }
+
+    func testClientIDFormatValidation() {
+        XCTAssertTrue(ClientIDScraper.isValidClientIDFormat("a1b2c3d4e5f60718293a4b5c6d7e8f90"))
+        XCTAssertTrue(ClientIDScraper.isValidClientIDFormat("ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"))
+
+        // Invalid lengths & characters
+        XCTAssertFalse(ClientIDScraper.isValidClientIDFormat(""))
+        XCTAssertFalse(ClientIDScraper.isValidClientIDFormat("abc123"))
+        XCTAssertFalse(ClientIDScraper.isValidClientIDFormat("a1b2c3d4e5f60718293a4b5c6d7e8f901")) // 33 chars
+        XCTAssertFalse(ClientIDScraper.isValidClientIDFormat("a1b2c3d4e5f60718293a4b5c6d7e8f9!"))  // symbol
+        XCTAssertFalse(ClientIDScraper.isValidClientIDFormat("a1b2c3d4e5f60718293a4b5c6d7e8f9-"))  // hyphen
+
+        let scraper = ClientIDScraper()
+        let originalManual = scraper.manualClientID
+        defer {
+            scraper.setManualClientID(originalManual)
+        }
+
+        // Reject invalid manual client_id
+        XCTAssertFalse(scraper.setManualClientID("invalid-short-id"))
+        // Accept valid 32-char alphanumeric client_id
+        let validID = "Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4"
+        XCTAssertTrue(scraper.setManualClientID(validID))
+        XCTAssertEqual(scraper.manualClientID, validID)
+        XCTAssertTrue(scraper.setManualClientID(nil))
+        XCTAssertNil(scraper.manualClientID)
     }
 }

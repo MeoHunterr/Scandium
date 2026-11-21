@@ -103,14 +103,49 @@ struct SpecularBorderGradient: View {
 
 // MARK: - Ambient Canvas Background (GPU-Optimized: pre-blurred via CoreImage on background thread)
 
-// File-scope blur cache (concurrent dictionary protected by barrier writes)
-private var blurredArtworkCache = [String: UIImage]()
-private let blurCacheQueue = DispatchQueue(label: "com.scandium.blurCache", attributes: .concurrent)
+// File-scope bounded LRU blur cache (max 30 entries, thread-safe via barrier writes)
+private final class BlurredArtworkLRUCache {
+    static let shared = BlurredArtworkLRUCache()
+
+    private let maxEntries = 30
+    private var storage = [String: UIImage]()
+    private var order = [String]()
+    private let queue = DispatchQueue(label: "com.scandium.blurCache", attributes: .concurrent)
+
+    func get(_ key: String) -> UIImage? {
+        var result: UIImage?
+        queue.sync(flags: .barrier) {
+            if let img = storage[key] {
+                result = img
+                if let idx = order.firstIndex(of: key) {
+                    order.remove(at: idx)
+                    order.append(key)
+                }
+            }
+        }
+        return result
+    }
+
+    func set(_ image: UIImage, for key: String) {
+        queue.async(flags: .barrier) {
+            self.storage[key] = image
+            if let idx = self.order.firstIndex(of: key) {
+                self.order.remove(at: idx)
+            }
+            self.order.append(key)
+            while self.order.count > self.maxEntries {
+                let evictedKey = self.order.removeFirst()
+                self.storage.removeValue(forKey: evictedKey)
+            }
+        }
+    }
+}
 
 struct AmbientCanvasBackground: View {
     let artworkURL: URL?
     @ObservedObject private var settings = AppSettings.shared
     @State private var blurredImage: UIImage?
+    @State private var loadTask: Task<Void, Never>?
 
     init(artworkURL: URL? = nil) {
         self.artworkURL = artworkURL
@@ -139,60 +174,62 @@ struct AmbientCanvasBackground: View {
         .ignoresSafeArea()
         .onAppear { loadBlurredArtwork(artworkURL) }
         .onChange(of: artworkURL?.absoluteString) { _ in loadBlurredArtwork(artworkURL) }
+        .onDisappear {
+            loadTask?.cancel()
+            loadTask = nil
+        }
     }
 
     private func loadBlurredArtwork(_ url: URL?) {
+        loadTask?.cancel()
+        loadTask = nil
+
         guard let url = url else {
             withAnimation(.easeOut(duration: 0.3)) { self.blurredImage = nil }
             return
         }
         let key = url.absoluteString
 
-        // 1. Check blur cache first (thread-safe synchronous read)
-        var cached: UIImage?
-        blurCacheQueue.sync {
-            cached = blurredArtworkCache[key]
-        }
-        if let cached = cached {
-            DispatchQueue.main.async {
-                withAnimation(.easeInOut(duration: 0.35)) { self.blurredImage = cached }
-            }
+        // 1. Check bounded LRU blur cache first
+        if let cached = BlurredArtworkLRUCache.shared.get(key) {
+            withAnimation(.easeInOut(duration: 0.35)) { self.blurredImage = cached }
             return
         }
 
-        // 2. Check if raw image already exists in ImageCacheStore
-        if let sourceImage = ImageCacheStore.shared.get(for: url) {
-            DispatchQueue.global(qos: .userInitiated).async {
-                guard let blurred = Self.createBlurredImage(from: sourceImage) else { return }
-                blurCacheQueue.async(flags: .barrier) {
-                    blurredArtworkCache[key] = blurred
-                }
-                DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.35)) { self.blurredImage = blurred }
+        // 2. Fetch raw image (cache or network) and blur off main thread
+        loadTask = Task {
+            var sourceImage = await ImageCacheStore.shared.get(for: url)
+            if Task.isCancelled { return }
+
+            if sourceImage == nil {
+                var request = URLRequest(url: url)
+                request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+                request.timeoutInterval = 10
+
+                if let (data, _) = try? await URLSession.shared.data(for: request),
+                   !Task.isCancelled,
+                   let downloaded = UIImage(data: data) {
+                    ImageCacheStore.shared.set(downloaded, for: url)
+                    sourceImage = downloaded
                 }
             }
-            return
+
+            guard !Task.isCancelled, let source = sourceImage else { return }
+
+            let blurred: UIImage? = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    continuation.resume(returning: Self.createBlurredImage(from: source))
+                }
+            }
+
+            guard !Task.isCancelled, let blurredImage = blurred else { return }
+            BlurredArtworkLRUCache.shared.set(blurredImage, for: key)
+
+            await MainActor.run {
+                guard !Task.isCancelled, self.artworkURL?.absoluteString == key else { return }
+                withAnimation(.easeInOut(duration: 0.35)) { self.blurredImage = blurredImage }
+            }
         }
-
-        // 3. Asynchronously download via URLSession (non-blocking)
-        var request = URLRequest(url: url)
-        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 10
-
-        URLSession.shared.dataTask(with: request) { data, _, _ in
-            guard let data = data, let source = UIImage(data: data) else { return }
-            ImageCacheStore.shared.set(source, for: url)
-
-            DispatchQueue.global(qos: .userInitiated).async {
-                guard let blurred = Self.createBlurredImage(from: source) else { return }
-                blurCacheQueue.async(flags: .barrier) {
-                    blurredArtworkCache[key] = blurred
-                }
-                DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.35)) { self.blurredImage = blurred }
-                }
-            }
-        }.resume()
     }
 
     // Uses CoreImage CIGaussianBlur — runs on background thread, GPU-accelerated
@@ -229,6 +266,7 @@ struct CachedAsyncImage<Placeholder: View>: View {
 
     @State private var loadedImage: UIImage?
     @State private var isLoading = false
+    @State private var loadTask: Task<Void, Never>?
 
     init(
         url: URL?,
@@ -260,9 +298,6 @@ struct CachedAsyncImage<Placeholder: View>: View {
                     .frame(width: width, height: height)
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                    .onAppear {
-                        loadImage()
-                    }
             }
         }
         .onAppear {
@@ -271,50 +306,78 @@ struct CachedAsyncImage<Placeholder: View>: View {
             }
         }
         .onChange(of: url?.absoluteString) { _ in
+            loadTask?.cancel()
+            loadTask = nil
             loadedImage = nil
+            isLoading = false
             loadImage()
+        }
+        .onDisappear {
+            loadTask?.cancel()
+            loadTask = nil
+            isLoading = false
         }
     }
 
     private func loadImage() {
-        guard let url = url, !isLoading else { return }
+        loadTask?.cancel()
+        loadTask = nil
 
-        if let cached = ImageCacheStore.shared.get(for: url) {
+        guard let targetURL = url else {
+            loadedImage = nil
+            isLoading = false
+            return
+        }
+        let targetKey = targetURL.absoluteString
+
+        // Fast synchronous memory cache check
+        if let cached = ImageCacheStore.shared.getFromMemory(for: targetURL) {
             self.loadedImage = cached
+            self.isLoading = false
             return
         }
 
         isLoading = true
-        Task {
-            // Check memory cache first
-            if let cached = ImageCacheStore.shared.get(for: url) {
+        loadTask = Task {
+            // Check disk cache on background queue
+            if let diskCached = await ImageCacheStore.shared.get(for: targetURL) {
                 await MainActor.run {
-                    self.loadedImage = cached
+                    guard !Task.isCancelled, self.url?.absoluteString == targetKey else { return }
+                    self.loadedImage = diskCached
                     self.isLoading = false
                 }
                 return
             }
 
+            guard !Task.isCancelled else { return }
+
             // Download with user-agent and timeout
-            var request = URLRequest(url: url)
+            var request = URLRequest(url: targetURL)
             request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
             request.timeoutInterval = 10
 
             var fetchedImage: UIImage? = nil
             do {
                 let (data, _) = try await URLSession.shared.data(for: request)
-                fetchedImage = UIImage(data: data)
+                if !Task.isCancelled {
+                    fetchedImage = UIImage(data: data)
+                }
             } catch {
-                // Quick retry once on error
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                if let (retryData, _) = try? await URLSession.shared.data(for: request) {
-                    fetchedImage = UIImage(data: retryData)
+                if !Task.isCancelled {
+                    // Quick retry once on non-cancelled error
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    if !Task.isCancelled, let (retryData, _) = try? await URLSession.shared.data(for: request) {
+                        fetchedImage = UIImage(data: retryData)
+                    }
                 }
             }
 
+            guard !Task.isCancelled else { return }
+
             if let img = fetchedImage {
-                ImageCacheStore.shared.set(img, for: url)
+                ImageCacheStore.shared.set(img, for: targetURL)
                 await MainActor.run {
+                    guard !Task.isCancelled, self.url?.absoluteString == targetKey else { return }
                     withAnimation(.easeIn(duration: 0.2)) {
                         self.loadedImage = img
                     }
@@ -322,6 +385,7 @@ struct CachedAsyncImage<Placeholder: View>: View {
                 }
             } else {
                 await MainActor.run {
+                    guard !Task.isCancelled, self.url?.absoluteString == targetKey else { return }
                     self.isLoading = false
                 }
             }
@@ -377,7 +441,12 @@ final class ImageCacheStore {
         return "img_\(abs(hash)).jpg"
     }
 
-    func get(for url: URL) -> UIImage? {
+    func getFromMemory(for url: URL) -> UIImage? {
+        let key = url.absoluteString as NSString
+        return memoryCache.object(forKey: key)
+    }
+
+    func get(for url: URL) async -> UIImage? {
         let key = url.absoluteString as NSString
         if let mem = memoryCache.object(forKey: key) {
             return mem
@@ -385,8 +454,17 @@ final class ImageCacheStore {
 
         guard let dir = diskCacheDir else { return nil }
         let fileURL = dir.appendingPathComponent(diskKey(for: url))
-        if let data = try? Data(contentsOf: fileURL), let diskImg = UIImage(data: data) {
-            memoryCache.setObject(diskImg, forKey: key, cost: data.count)
+        let loaded: (UIImage, Int)? = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                if let data = try? Data(contentsOf: fileURL), let diskImg = UIImage(data: data) {
+                    continuation.resume(returning: (diskImg, data.count))
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+        if let (diskImg, cost) = loaded {
+            memoryCache.setObject(diskImg, forKey: key, cost: cost)
             return diskImg
         }
         return nil

@@ -177,13 +177,44 @@ struct SoundCloudLoginWebView: UIViewRepresentable {
             }
         }
 
+        private static let allowedDomainSuffixes: [String] = [
+            "soundcloud.com",
+            "sndcdn.com",
+            "google.com",
+            "gstatic.com",
+            "googleapis.com",
+            "googleusercontent.com",
+            "recaptcha.net",
+            "apple.com",
+            "cdn-apple.com",
+            "facebook.com",
+            "fbcdn.net"
+        ]
+
+        private func isAllowedHost(_ host: String) -> Bool {
+            let lower = host.lowercased()
+            return Self.allowedDomainSuffixes.contains { suffix in
+                lower == suffix || lower.hasSuffix(".\(suffix)")
+            }
+        }
+
+        private func isValidSoundCloudCookieDomain(_ domain: String) -> Bool {
+            let lower = domain.lowercased()
+            return lower == "soundcloud.com" || lower.hasSuffix(".soundcloud.com")
+        }
+
         func checkCookies(in cookieStore: WKHTTPCookieStore) {
             guard !hasCapturedToken else { return }
 
             cookieStore.getAllCookies { [weak self] cookies in
                 guard let self = self, !self.hasCapturedToken else { return }
 
-                if let oauthCookie = cookies.first(where: { $0.name == "oauth_token" && !$0.value.isEmpty }) {
+                if let oauthCookie = cookies.first(where: {
+                    $0.name == "oauth_token" &&
+                    !$0.value.isEmpty &&
+                    $0.isSecure &&
+                    self.isValidSoundCloudCookieDomain($0.domain)
+                }) {
                     self.hasCapturedToken = true
                     let tokenValue = oauthCookie.value
 
@@ -213,8 +244,17 @@ struct SoundCloudLoginWebView: UIViewRepresentable {
                 return
             }
 
-            // Only allow standard http/https schemes for safe authentication
-            guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            if let targetFrame = navigationAction.targetFrame,
+               !targetFrame.isMainFrame,
+               url.absoluteString == "about:blank" {
+                decisionHandler(.allow)
+                return
+            }
+
+            guard let scheme = url.scheme?.lowercased(),
+                  scheme == "https",
+                  let host = url.host,
+                  isAllowedHost(host) else {
                 decisionHandler(.cancel)
                 return
             }
@@ -252,7 +292,11 @@ struct SoundCloudLoginWebView: UIViewRepresentable {
         // MARK: - WKUIDelegate (Support OAuth Popups like Google/Apple within webview)
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-            if navigationAction.targetFrame == nil {
+            if navigationAction.targetFrame == nil,
+               let url = navigationAction.request.url,
+               url.scheme?.lowercased() == "https",
+               let host = url.host,
+               isAllowedHost(host) {
                 webView.load(navigationAction.request)
             }
             return nil

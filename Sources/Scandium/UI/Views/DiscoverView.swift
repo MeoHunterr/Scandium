@@ -465,6 +465,9 @@ final class DiscoverDataStore: ObservableObject {
     @Published var error: String?
 
     private var hasLoaded: Bool = false
+    private var isInFlight: Bool = false
+    private var loadTask: Task<Void, Never>?
+    private var loadGeneration: Int = 0
     private let cacheKey = "scandium_discover_cached_payload_v2"
     private let legacyCacheKey = "scandium_discover_cached_payload_v1"
 
@@ -550,27 +553,50 @@ final class DiscoverDataStore: ObservableObject {
         }
     }
 
+    @MainActor
     func refresh(api: SoundCloudAPI) async {
-        await MainActor.run {
-            self.isRefreshing = true
+        loadTask?.cancel()
+        loadGeneration += 1
+        let generation = loadGeneration
+        isInFlight = true
+        isRefreshing = true
+
+        let task = Task<Void, Never> { [weak self] in
+            guard let self = self else { return }
+            await self.loadData(api: api, force: true, generation: generation)
         }
-        await loadData(api: api, force: true)
-        await MainActor.run {
-            self.isRefreshing = false
+        loadTask = task
+        await task.value
+
+        if loadGeneration == generation {
+            isRefreshing = false
         }
     }
 
+    @MainActor
     func loadInitialData(api: SoundCloudAPI, force: Bool = false) {
-        if isLoading && !force {
+        if !force && (hasLoaded || isInFlight) {
             return
         }
-        Task {
-            await loadData(api: api, force: force)
+        if force {
+            loadTask?.cancel()
+        } else if isInFlight {
+            return
+        }
+
+        loadGeneration += 1
+        let generation = loadGeneration
+        isInFlight = true
+
+        loadTask = Task<Void, Never> { [weak self] in
+            guard let self = self else { return }
+            await self.loadData(api: api, force: force, generation: generation)
         }
     }
 
-    private func loadData(api: SoundCloudAPI, force: Bool) async {
+    private func loadData(api: SoundCloudAPI, force: Bool, generation: Int) async {
         await MainActor.run {
+            guard self.loadGeneration == generation else { return }
             if self.quickPicks.isEmpty && self.trendingTracks.isEmpty {
                 self.isLoading = true
             }
@@ -586,6 +612,7 @@ final class DiscoverDataStore: ObservableObject {
         async let followingTask = fetchFollowingStreamTracks(api: api, auth: auth)
 
         let (seedResult, trendingResult, followingResult) = await (seedTask, trendingTask, followingTask)
+        if Task.isCancelled { return }
 
         // PHASE 2: Favorite Artist Spotlight & 2 Dynamic Genre Carousels (max ~2-3 concurrent requests)
         let selectedGenres = Array(Self.genrePool.shuffled().prefix(2))
@@ -594,6 +621,7 @@ final class DiscoverDataStore: ObservableObject {
         async let genre2Task = fetchGenreSection(api: api, genre: selectedGenres[1])
 
         let (artistResult, g1Result, g2Result) = await (artistTask, genre1Task, genre2Task)
+        if Task.isCancelled { return }
 
         // Select Quick Picks:
         // Prioritize fresh random sample from personalized recommendations; cold start fallback to trending
@@ -607,6 +635,8 @@ final class DiscoverDataStore: ObservableObject {
         }
 
         await MainActor.run {
+            guard !Task.isCancelled, self.loadGeneration == generation else { return }
+
             self.quickPicks = self.deduplicateTracks(qpCandidates)
             self.followingTracks = followingResult
 
@@ -635,6 +665,7 @@ final class DiscoverDataStore: ObservableObject {
             self.genre2Tracks = g2Result.tracks
 
             self.isLoading = false
+            self.isInFlight = false
             self.hasLoaded = true
             self.saveCachedFeed()
 

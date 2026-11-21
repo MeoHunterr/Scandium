@@ -597,7 +597,7 @@ struct ProfileView: View {
                     title: settings.loc("Phiên bản", "Version"),
                     showDivider: true
                 ) {
-                    Text("1.4.2")
+                    Text("1.5.0")
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundColor(ScandiumTheme.spotifyGreen)
                 }

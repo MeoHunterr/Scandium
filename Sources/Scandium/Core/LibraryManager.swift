@@ -19,6 +19,9 @@ final class LibraryManager: ObservableObject {
     @Published private(set) var recentlyPlayed: [Track] = []
     @Published private(set) var userPlaylists: [SoundCloudPlaylist] = []
 
+    /// O(1) lookup set synchronized with `likedTracks`
+    private var likedTrackIDs = Set<Int>()
+
     // MARK: - Constants
 
     private static let maxRecentlyPlayed = 50
@@ -35,6 +38,12 @@ final class LibraryManager: ObservableObject {
 
     private var db: OpaquePointer?
     private let dbQueue = DispatchQueue(label: "com.scandium.db")
+
+    // MARK: - Sync Tracking
+
+    private var isSyncingLikes: Bool = false
+    private var locallyLikedDuringSyncIDs = Set<Int>()
+    private var locallyUnlikedDuringSyncIDs = Set<Int>()
 
     // MARK: - Init
 
@@ -53,7 +62,12 @@ final class LibraryManager: ObservableObject {
         let dbURL = dir.appendingPathComponent("scandium_library.db")
         let path = dbURL.path
         path.withCString { cPath in
-            if sqlite3_open(cPath, &db) != SQLITE_OK {
+            let rc = sqlite3_open(cPath, &db)
+            if rc != SQLITE_OK {
+                print("[LibraryManager] Failed to open SQLite DB (code \(rc))")
+                if let failedDB = db {
+                    sqlite3_close(failedDB)
+                }
                 db = nil
             }
         }
@@ -62,30 +76,35 @@ final class LibraryManager: ObservableObject {
     private func createTables() {
         guard let db = db else { return }
         dbQueue.sync {
-            let createLiked = """
+            let statements = [
+                """
                 CREATE TABLE IF NOT EXISTS liked_tracks (
                     id INTEGER PRIMARY KEY,
                     json_data TEXT NOT NULL,
                     position INTEGER
                 );
-            """
-            let createRecent = """
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS recently_played (
                     id INTEGER PRIMARY KEY,
                     json_data TEXT NOT NULL,
                     position INTEGER
                 );
-            """
-            let createPlaylists = """
+                """,
+                """
                 CREATE TABLE IF NOT EXISTS playlists (
                     id INTEGER PRIMARY KEY,
                     json_data TEXT NOT NULL,
                     position INTEGER
                 );
-            """
-            sqlite3_exec(db, createLiked, nil, nil, nil)
-            sqlite3_exec(db, createRecent, nil, nil, nil)
-            sqlite3_exec(db, createPlaylists, nil, nil, nil)
+                """
+            ]
+            for sql in statements {
+                let rc = sqlite3_exec(db, sql, nil, nil, nil)
+                if rc != SQLITE_OK {
+                    print("[LibraryManager] Failed to create table (code \(rc))")
+                }
+            }
         }
     }
 
@@ -97,34 +116,37 @@ final class LibraryManager: ObservableObject {
         let migratedRecentKey    = Self.legacyRecentKey + Self.migratedSuffix
         let migratedPlaylistsKey = Self.legacyPlaylistsKey + Self.migratedSuffix
 
-        // Migrate liked tracks
+        // Migrate liked tracks: remove legacy key & mark migrated only when decode and SQLite insert succeed
         if let data = ud.data(forKey: Self.legacyLikedKey),
-           !ud.bool(forKey: migratedLikedKey) {
-            if let tracks = try? JSONDecoder().decode([Track].self, from: data) {
-                dbQueue.sync { self._insertLikedTracks(tracks) }
+           !ud.bool(forKey: migratedLikedKey),
+           let tracks = try? JSONDecoder().decode([Track].self, from: data) {
+            let inserted = dbQueue.sync { self._insertLikedTracks(tracks) }
+            if inserted {
+                ud.removeObject(forKey: Self.legacyLikedKey)
+                ud.set(true, forKey: migratedLikedKey)
             }
-            ud.removeObject(forKey: Self.legacyLikedKey)
-            ud.set(true, forKey: migratedLikedKey)
         }
 
         // Migrate recently played
         if let data = ud.data(forKey: Self.legacyRecentKey),
-           !ud.bool(forKey: migratedRecentKey) {
-            if let tracks = try? JSONDecoder().decode([Track].self, from: data) {
-                dbQueue.sync { self._insertRecentlyPlayed(tracks) }
+           !ud.bool(forKey: migratedRecentKey),
+           let tracks = try? JSONDecoder().decode([Track].self, from: data) {
+            let inserted = dbQueue.sync { self._insertRecentlyPlayed(tracks) }
+            if inserted {
+                ud.removeObject(forKey: Self.legacyRecentKey)
+                ud.set(true, forKey: migratedRecentKey)
             }
-            ud.removeObject(forKey: Self.legacyRecentKey)
-            ud.set(true, forKey: migratedRecentKey)
         }
 
         // Migrate playlists
         if let data = ud.data(forKey: Self.legacyPlaylistsKey),
-           !ud.bool(forKey: migratedPlaylistsKey) {
-            if let playlists = try? JSONDecoder().decode([SoundCloudPlaylist].self, from: data) {
-                dbQueue.sync { self._insertPlaylists(playlists) }
+           !ud.bool(forKey: migratedPlaylistsKey),
+           let playlists = try? JSONDecoder().decode([SoundCloudPlaylist].self, from: data) {
+            let inserted = dbQueue.sync { self._insertPlaylists(playlists) }
+            if inserted {
+                ud.removeObject(forKey: Self.legacyPlaylistsKey)
+                ud.set(true, forKey: migratedPlaylistsKey)
             }
-            ud.removeObject(forKey: Self.legacyPlaylistsKey)
-            ud.set(true, forKey: migratedPlaylistsKey)
         }
     }
 
@@ -137,6 +159,7 @@ final class LibraryManager: ObservableObject {
             let playlists = self._queryPlaylists()
             DispatchQueue.main.async {
                 self.likedTracks    = liked
+                self.likedTrackIDs  = Set(liked.map { $0.id })
                 self.recentlyPlayed = recent
                 self.userPlaylists  = playlists
             }
@@ -146,7 +169,7 @@ final class LibraryManager: ObservableObject {
     // MARK: - Liked Tracks API
 
     func isLiked(track: Track) -> Bool {
-        likedTracks.contains(where: { $0.id == track.id })
+        likedTrackIDs.contains(track.id)
     }
 
     func toggleLike(track: Track) {
@@ -158,13 +181,22 @@ final class LibraryManager: ObservableObject {
     }
 
     func like(track: Track) {
-        guard !isLiked(track: track) else { return }
+        if isSyncingLikes {
+            locallyLikedDuringSyncIDs.insert(track.id)
+            locallyUnlikedDuringSyncIDs.remove(track.id)
+        }
+        guard likedTrackIDs.insert(track.id).inserted else { return }
         likedTracks.insert(track, at: 0)
         let snapshot = likedTracks
-        dbQueue.async { self._insertLikedTracks(snapshot) }
+        dbQueue.async { self._upsertLikedTracks(snapshot) }
     }
 
     func unlike(track: Track) {
+        if isSyncingLikes {
+            locallyUnlikedDuringSyncIDs.insert(track.id)
+            locallyLikedDuringSyncIDs.remove(track.id)
+        }
+        likedTrackIDs.remove(track.id)
         likedTracks.removeAll(where: { $0.id == track.id })
         let remaining = likedTracks
         dbQueue.async {
@@ -178,67 +210,111 @@ final class LibraryManager: ObservableObject {
 
     func clearLikedTracks() {
         likedTracks.removeAll()
+        likedTrackIDs.removeAll()
         dbQueue.async { self._deleteAll(table: "liked_tracks") }
     }
 
-    /// Merges remote liked tracks into local liked tracks, avoiding duplicates
+    /// Merges remote liked tracks into local liked tracks, avoiding duplicates (never prunes/replaces SQLite)
     func syncLikedTracks(_ tracks: [Track]) {
         var changed = false
         for track in tracks.reversed() {
-            if !isLiked(track: track) {
+            if likedTrackIDs.insert(track.id).inserted {
                 likedTracks.insert(track, at: 0)
                 changed = true
             }
         }
         if changed {
             let snapshot = self.likedTracks
-            dbQueue.async { self._insertLikedTracks(snapshot) }
+            dbQueue.async { self._upsertLikedTracks(snapshot) }
         }
+    }
+
+    func beginLikesSync() {
+        isSyncingLikes = true
+        locallyLikedDuringSyncIDs.removeAll()
+        locallyUnlikedDuringSyncIDs.removeAll()
+    }
+
+    func endLikesSyncWithoutFinalize() {
+        isSyncingLikes = false
+        locallyLikedDuringSyncIDs.removeAll()
+        locallyUnlikedDuringSyncIDs.removeAll()
     }
 
     /// Incremental sync for liked tracks — called page-by-page as pages arrive from SoundCloud API.
     func syncLikedTracksIncremental(pageTracks: [Track], isFirstPage: Bool) {
+        let filteredPageTracks = pageTracks.filter { !locallyUnlikedDuringSyncIDs.contains($0.id) }
         if isFirstPage {
             var uniquePage: [Track] = []
             var seen = Set<Int>()
-            for t in pageTracks {
+            for t in filteredPageTracks {
                 if seen.insert(t.id).inserted {
                     uniquePage.append(t)
                 }
             }
             let pageIDs = seen
-            let remaining = likedTracks.filter { !pageIDs.contains($0.id) }
-            likedTracks = uniquePage + remaining
+            let localAdditions = likedTracks.filter {
+                locallyLikedDuringSyncIDs.contains($0.id) && !pageIDs.contains($0.id)
+            }
+            let remaining = likedTracks.filter {
+                !pageIDs.contains($0.id) && !locallyLikedDuringSyncIDs.contains($0.id)
+            }
+            likedTracks = localAdditions + uniquePage + remaining
+            likedTrackIDs = Set(likedTracks.map { $0.id })
         } else {
-            var existingIDs = Set(likedTracks.map { $0.id })
             var added: [Track] = []
-            for t in pageTracks {
-                if existingIDs.insert(t.id).inserted {
+            for t in filteredPageTracks {
+                if likedTrackIDs.insert(t.id).inserted {
                     added.append(t)
                 }
             }
             likedTracks.append(contentsOf: added)
         }
         let snapshot = likedTracks
-        dbQueue.async { self._insertLikedTracks(snapshot) }
+        dbQueue.async { self._upsertLikedTracks(snapshot) }
     }
 
-    /// Prunes any local liked tracks that were not returned during full sync
-    func finalizeLikedTracksSync(syncedIDs: Set<Int>) {
-        guard !syncedIDs.isEmpty else { return }
-        let filtered = likedTracks.filter { syncedIDs.contains($0.id) }
+    /// Prunes any local liked tracks that were not returned during full sync.
+    /// Only executes when `completed == true` (all pagination pages succeeded without error).
+    /// Preserves tracks newly liked locally while sync was in progress.
+    func finalizeLikedTracksSync(syncedIDs: Set<Int>, completed: Bool) {
+        defer {
+            isSyncingLikes = false
+            locallyLikedDuringSyncIDs.removeAll()
+            locallyUnlikedDuringSyncIDs.removeAll()
+        }
+        guard completed else { return }
+
+        let filtered = likedTracks.filter {
+            syncedIDs.contains($0.id) || locallyLikedDuringSyncIDs.contains($0.id)
+        }
         if filtered.count != likedTracks.count {
             likedTracks = filtered
+            likedTrackIDs = Set(filtered.map { $0.id })
             let snapshot = likedTracks
             dbQueue.async { self._insertLikedTracks(snapshot) }
         }
     }
 
-    /// Synchronizes user playlists from SoundCloud account
+    /// Synchronizes user playlists from SoundCloud account in a single SQLite transaction.
     func syncUserPlaylists(_ playlists: [SoundCloudPlaylist]) {
         self.userPlaylists = playlists
         let snapshot = playlists
         dbQueue.async { self._insertPlaylists(snapshot) }
+    }
+
+    /// Clears account-synced likes and playlists on logout while preserving local listening history.
+    func clearSyncedAccountData() {
+        isSyncingLikes = false
+        locallyLikedDuringSyncIDs.removeAll()
+        locallyUnlikedDuringSyncIDs.removeAll()
+        likedTracks.removeAll()
+        likedTrackIDs.removeAll()
+        userPlaylists.removeAll()
+        dbQueue.async {
+            self._deleteAll(table: "liked_tracks")
+            self._deleteAll(table: "playlists")
+        }
     }
 
     // MARK: - Recently Played API
@@ -264,6 +340,7 @@ final class LibraryManager: ObservableObject {
 
     func clearAllData() {
         likedTracks.removeAll()
+        likedTrackIDs.removeAll()
         recentlyPlayed.removeAll()
         userPlaylists.removeAll()
         dbQueue.async {
@@ -326,76 +403,83 @@ final class LibraryManager: ObservableObject {
         return results
     }
 
-    /// Replaces all rows in table with the given tracks (position = array index)
-    private func _insertLikedTracks(_ tracks: [Track]) {
-        guard let db = db else { return }
-        sqlite3_exec(db, "BEGIN TRANSACTION;", nil, nil, nil)
-        sqlite3_exec(db, "DELETE FROM liked_tracks;", nil, nil, nil)
-        let encoder = JSONEncoder()
-        for (pos, track) in tracks.enumerated() {
-            guard let data = try? encoder.encode(track),
-                  let jsonStr = String(data: data, encoding: .utf8) else { continue }
-            var stmt: OpaquePointer?
-            let sql = "INSERT OR REPLACE INTO liked_tracks (id, json_data, position) VALUES (?, ?, ?);"
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_int64(stmt, 1, Int64(track.id))
+    private func _executeTransaction(_ db: OpaquePointer, work: () -> Bool) -> Bool {
+        guard sqlite3_exec(db, "BEGIN TRANSACTION;", nil, nil, nil) == SQLITE_OK else {
+            return false
+        }
+        guard work() else {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            return false
+        }
+        if sqlite3_exec(db, "COMMIT;", nil, nil, nil) != SQLITE_OK {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            return false
+        }
+        return true
+    }
+
+    private func _writeRows<Item: Encodable>(
+        items: [Item],
+        idProvider: (Item) -> Int,
+        table: String,
+        replaceExisting: Bool
+    ) -> Bool {
+        guard let db = db, _isValidTable(table) else { return false }
+        return _executeTransaction(db) {
+            if replaceExisting {
+                guard sqlite3_exec(db, "DELETE FROM \(table);", nil, nil, nil) == SQLITE_OK else {
+                    return false
+                }
+            }
+            let encoder = JSONEncoder()
+            let sql = "INSERT OR REPLACE INTO \(table) (id, json_data, position) VALUES (?, ?, ?);"
+            for (pos, item) in items.enumerated() {
+                guard let data = try? encoder.encode(item),
+                      let jsonStr = String(data: data, encoding: .utf8) else {
+                    return false
+                }
+                var stmt: OpaquePointer?
+                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                    sqlite3_finalize(stmt)
+                    return false
+                }
+                sqlite3_bind_int64(stmt, 1, Int64(idProvider(item)))
                 _ = jsonStr.withCString { cStr in
                     sqlite3_bind_text(stmt, 2, cStr, -1, SQLITE_TRANSIENT)
                 }
                 sqlite3_bind_int64(stmt, 3, Int64(pos))
-                sqlite3_step(stmt)
+                let stepRC = sqlite3_step(stmt)
+                sqlite3_finalize(stmt)
+                guard stepRC == SQLITE_DONE else {
+                    return false
+                }
             }
-            sqlite3_finalize(stmt)
+            return true
         }
-        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+    }
+
+    /// Upserts rows in liked_tracks without deleting existing rows (safe for incremental/merge-only sync)
+    @discardableResult
+    private func _upsertLikedTracks(_ tracks: [Track]) -> Bool {
+        _writeRows(items: tracks, idProvider: { $0.id }, table: "liked_tracks", replaceExisting: false)
+    }
+
+    /// Replaces all rows in table with the given tracks (position = array index)
+    @discardableResult
+    private func _insertLikedTracks(_ tracks: [Track]) -> Bool {
+        _writeRows(items: tracks, idProvider: { $0.id }, table: "liked_tracks", replaceExisting: true)
     }
 
     /// Replaces all rows in recently_played with the given tracks (position = array index)
-    private func _insertRecentlyPlayed(_ tracks: [Track]) {
-        guard let db = db else { return }
-        sqlite3_exec(db, "BEGIN TRANSACTION;", nil, nil, nil)
-        sqlite3_exec(db, "DELETE FROM recently_played;", nil, nil, nil)
-        let encoder = JSONEncoder()
-        for (pos, track) in tracks.enumerated() {
-            guard let data = try? encoder.encode(track),
-                  let jsonStr = String(data: data, encoding: .utf8) else { continue }
-            var stmt: OpaquePointer?
-            let sql = "INSERT OR REPLACE INTO recently_played (id, json_data, position) VALUES (?, ?, ?);"
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_int64(stmt, 1, Int64(track.id))
-                _ = jsonStr.withCString { cStr in
-                    sqlite3_bind_text(stmt, 2, cStr, -1, SQLITE_TRANSIENT)
-                }
-                sqlite3_bind_int64(stmt, 3, Int64(pos))
-                sqlite3_step(stmt)
-            }
-            sqlite3_finalize(stmt)
-        }
-        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+    @discardableResult
+    private func _insertRecentlyPlayed(_ tracks: [Track]) -> Bool {
+        _writeRows(items: tracks, idProvider: { $0.id }, table: "recently_played", replaceExisting: true)
     }
 
     /// Replaces all rows in playlists with the given playlists
-    private func _insertPlaylists(_ playlists: [SoundCloudPlaylist]) {
-        guard let db = db else { return }
-        sqlite3_exec(db, "BEGIN TRANSACTION;", nil, nil, nil)
-        sqlite3_exec(db, "DELETE FROM playlists;", nil, nil, nil)
-        let encoder = JSONEncoder()
-        for (pos, playlist) in playlists.enumerated() {
-            guard let data = try? encoder.encode(playlist),
-                  let jsonStr = String(data: data, encoding: .utf8) else { continue }
-            var stmt: OpaquePointer?
-            let sql = "INSERT OR REPLACE INTO playlists (id, json_data, position) VALUES (?, ?, ?);"
-            if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-                sqlite3_bind_int64(stmt, 1, Int64(playlist.id))
-                _ = jsonStr.withCString { cStr in
-                    sqlite3_bind_text(stmt, 2, cStr, -1, SQLITE_TRANSIENT)
-                }
-                sqlite3_bind_int64(stmt, 3, Int64(pos))
-                sqlite3_step(stmt)
-            }
-            sqlite3_finalize(stmt)
-        }
-        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+    @discardableResult
+    private func _insertPlaylists(_ playlists: [SoundCloudPlaylist]) -> Bool {
+        _writeRows(items: playlists, idProvider: { $0.id }, table: "playlists", replaceExisting: true)
     }
 
     private func _deleteTrack(id: Int, table: String) {
@@ -404,7 +488,7 @@ final class LibraryManager: ObservableObject {
         let sql = "DELETE FROM \(table) WHERE id = ?;"
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_int64(stmt, 1, Int64(id))
-            sqlite3_step(stmt)
+            _ = sqlite3_step(stmt)
         }
         sqlite3_finalize(stmt)
     }
@@ -416,13 +500,13 @@ final class LibraryManager: ObservableObject {
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             sqlite3_bind_int64(stmt, 1, Int64(position))
             sqlite3_bind_int64(stmt, 2, Int64(id))
-            sqlite3_step(stmt)
+            _ = sqlite3_step(stmt)
         }
         sqlite3_finalize(stmt)
     }
 
     private func _deleteAll(table: String) {
         guard let db = db, _isValidTable(table) else { return }
-        sqlite3_exec(db, "DELETE FROM \(table);", nil, nil, nil)
+        _ = sqlite3_exec(db, "DELETE FROM \(table);", nil, nil, nil)
     }
 }

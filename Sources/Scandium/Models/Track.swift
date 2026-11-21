@@ -409,17 +409,33 @@ struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
         self.user = try? container.decodeIfPresent(SoundCloudUser.self, forKey: .user)
 
         // Resilient tracks decoding:
-        // SoundCloud playlist summaries often include track stubs with only {"id": 123} without title/duration.
-        // We decode full tracks if present, or ignore incomplete track stubs so the playlist doesn't fail decoding.
+        // SoundCloud playlist summaries often include track stubs with only {"id": 123}, null, or malformed entries.
+        // We decode full tracks if present and always consume the current element to prevent infinite loops.
+        struct PermissiveTrackElement: Decodable {
+            let track: Track?
+            init(from decoder: Decoder) throws {
+                self.track = try? Track(from: decoder)
+            }
+        }
+
         if let directTracks = try? container.decodeIfPresent([Track].self, forKey: .tracks) {
             self.tracks = directTracks
         } else if var tracksUnkeyed = try? container.nestedUnkeyedContainer(forKey: .tracks) {
             var validTracks: [Track] = []
             while !tracksUnkeyed.isAtEnd {
-                if let t = try? tracksUnkeyed.decode(Track.self) {
-                    validTracks.append(t)
-                } else {
-                    _ = try? tracksUnkeyed.decode(PlaylistTrackStub.self)
+                let previousIndex = tracksUnkeyed.currentIndex
+                do {
+                    if let element = try tracksUnkeyed.decodeIfPresent(PermissiveTrackElement.self),
+                       let track = element.track {
+                        validTracks.append(track)
+                    }
+                } catch {
+                    if tracksUnkeyed.currentIndex == previousIndex {
+                        _ = try? tracksUnkeyed.superDecoder()
+                    }
+                }
+                if tracksUnkeyed.currentIndex == previousIndex {
+                    break
                 }
             }
             self.tracks = validTracks.isEmpty ? nil : validTracks

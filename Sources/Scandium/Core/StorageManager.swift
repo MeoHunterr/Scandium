@@ -54,6 +54,12 @@ final class StorageManager: ObservableObject {
         return Double(userDataBytes) / Double(totalBytes)
     }
 
+    private static let imageCacheFolderName = "scandium_image_cache"
+    private static let libraryDBFileName = "scandium_library.db"
+    private static let whitelistedTempPrefixes = ["scandium_", "CFNetworkDownload_"]
+    private static let whitelistedAudioExtensions: Set<String> = ["mp3", "m4a", "aac", "mp4", "ts", "m3u8"]
+    private static let activeTempGraceInterval: TimeInterval = 60
+
     // MARK: - Calculate Usage
 
     func refreshUsage() {
@@ -61,35 +67,33 @@ final class StorageManager: ObservableObject {
             guard let self = self else { return }
             let fileManager = FileManager.default
 
-            let urlCacheDisk = Int64(URLCache.shared.currentDiskUsage)
-
-            var tmpBytes: Int64 = 0
-            let tmpDir = NSTemporaryDirectory()
-            tmpBytes += self.directorySize(url: URL(fileURLWithPath: tmpDir))
-
+            // 1. Image Cache: scandium_image_cache + URLCache disk usage
+            var imgBytes = Int64(URLCache.shared.currentDiskUsage)
             if let cachesURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
-                let totalCaches = self.directorySize(url: cachesURL)
-                let nonURLCache = max(0, totalCaches - urlCacheDisk)
-                tmpBytes += nonURLCache
+                let imageCacheDir = cachesURL.appendingPathComponent(Self.imageCacheFolderName, isDirectory: true)
+                imgBytes += self.directorySize(url: imageCacheDir)
             }
 
+            // 2. Audio Temp Cache: whitelisted audio/stream temp files in NSTemporaryDirectory()
+            let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            let audioBytes = self.whitelistedAudioTempSize(in: tmpURL)
+
+            // 3. User Data: SQLite database (scandium_library.db*) + Application Support
             var userBytes: Int64 = 0
+            if let docsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let dbSuffixes = ["", "-wal", "-shm", "-journal"]
+                for suffix in dbSuffixes {
+                    let dbFileURL = docsURL.appendingPathComponent(Self.libraryDBFileName + suffix)
+                    userBytes += self.fileSize(url: dbFileURL)
+                }
+            }
             if let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
                 userBytes += self.directorySize(url: appSupport)
             }
-            if let likedData = UserDefaults.standard.data(forKey: "scandium_liked_tracks") {
-                userBytes += Int64(likedData.count)
-            }
-            if let recentData = UserDefaults.standard.data(forKey: "scandium_recently_played") {
-                userBytes += Int64(recentData.count)
-            }
-            if userBytes == 0 {
-                userBytes = 4096
-            }
 
-            let finalImageBytes = max(urlCacheDisk, 0)
-            let finalAudioBytes = max(tmpBytes, 0)
-            let finalUserBytes = userBytes
+            let finalImageBytes = max(imgBytes, 0)
+            let finalAudioBytes = max(audioBytes, 0)
+            let finalUserBytes = max(userBytes, 0)
             let finalTotal = finalImageBytes + finalAudioBytes + finalUserBytes
 
             DispatchQueue.main.async {
@@ -103,30 +107,12 @@ final class StorageManager: ObservableObject {
 
     // MARK: - Clear Cache
 
-    /// Wipes image cache, URL cache, and temporary stream files. Liked tracks and settings are preserved.
+    /// Wipes app-owned image cache, URLCache, and whitelisted temporary stream files.
+    /// SQLite library data, settings, and unrelated system/active files are preserved.
     func clearCache() {
-        // Clear URLCache and memory cache
+        ImageCacheStore.shared.clear()
         URLCache.shared.removeAllCachedResponses()
-
-        let fileManager = FileManager.default
-
-        // Clear NSTemporaryDirectory()
-        let tmpDir = NSTemporaryDirectory()
-        if let tmpFiles = try? fileManager.contentsOfDirectory(atPath: tmpDir) {
-            for file in tmpFiles {
-                let fullPath = (tmpDir as NSString).appendingPathComponent(file)
-                try? fileManager.removeItem(atPath: fullPath)
-            }
-        }
-
-        // Clear Caches directory contents
-        if let cachesURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first,
-           let cacheItems = try? fileManager.contentsOfDirectory(at: cachesURL, includingPropertiesForKeys: nil) {
-            for item in cacheItems {
-                try? fileManager.removeItem(at: item)
-            }
-        }
-
+        removeWhitelistedAudioTempFiles()
         refreshUsage()
     }
 
@@ -137,41 +123,48 @@ final class StorageManager: ObservableObject {
         refreshUsage()
     }
 
-    /// Clears only temporary audio and stream buffer files
+    /// Clears only whitelisted temporary audio and stream buffer files
     func clearAudioCacheOnly() {
-        let fileManager = FileManager.default
-        let tmpDir = NSTemporaryDirectory()
-        if let tmpFiles = try? fileManager.contentsOfDirectory(atPath: tmpDir) {
-            for file in tmpFiles {
-                let fullPath = (tmpDir as NSString).appendingPathComponent(file)
-                try? fileManager.removeItem(atPath: fullPath)
-            }
-        }
+        removeWhitelistedAudioTempFiles()
         refreshUsage()
     }
 
-    /// Evicts oldest temp audio files using LRU when total exceeds 250 MB
+    /// Evicts oldest whitelisted temp audio files using LRU when total exceeds 250 MB
     func evictAudioTempIfNeeded() {
         let maxBytes: Int64 = 250 * 1024 * 1024
         let targetBytes: Int64 = Int64(Double(maxBytes) * 0.8)
         DispatchQueue.global(qos: .background).async {
             let fm = FileManager.default
-            let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             guard let files = try? fm.contentsOfDirectory(
                 at: tmpURL,
-                includingPropertiesForKeys: [.fileSizeKey, .contentAccessDateKey],
+                includingPropertiesForKeys: [.fileSizeKey, .contentAccessDateKey, .contentModificationDateKey, .isDirectoryKey],
                 options: .skipsHiddenFiles
             ) else { return }
+
             var totalSize: Int64 = 0
             var fileInfos: [(url: URL, size: Int64, accessDate: Date)] = []
-            for fileURL in files {
-                guard let attrs = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentAccessDateKey]),
-                      let size = attrs.fileSize,
-                      let accessDate = attrs.contentAccessDate else { continue }
-                let s = Int64(size)
-                totalSize += s
-                fileInfos.append((url: fileURL, size: s, accessDate: accessDate))
+            let now = Date()
+
+            for fileURL in files where self.isWhitelistedAudioTempItem(fileURL) {
+                guard let attrs = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentAccessDateKey, .contentModificationDateKey, .isDirectoryKey]) else {
+                    continue
+                }
+                if let modDate = attrs.contentModificationDate,
+                   now.timeIntervalSince(modDate) < Self.activeTempGraceInterval {
+                    continue
+                }
+                let itemSize: Int64
+                if attrs.isDirectory == true {
+                    itemSize = self.directorySize(url: fileURL)
+                } else {
+                    itemSize = Int64(attrs.fileSize ?? 0)
+                }
+                let accessDate = attrs.contentAccessDate ?? attrs.contentModificationDate ?? Date.distantPast
+                totalSize += itemSize
+                fileInfos.append((url: fileURL, size: itemSize, accessDate: accessDate))
             }
+
             guard totalSize > maxBytes else { return }
             fileInfos.sort { $0.accessDate < $1.accessDate }
             for info in fileInfos {
@@ -180,6 +173,66 @@ final class StorageManager: ObservableObject {
                 totalSize -= info.size
             }
         }
+    }
+
+    // MARK: - Private Helpers
+
+    private func isWhitelistedAudioTempItem(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        if Self.whitelistedTempPrefixes.contains(where: { name.hasPrefix($0) }) {
+            return true
+        }
+        let ext = url.pathExtension.lowercased()
+        return Self.whitelistedAudioExtensions.contains(ext)
+    }
+
+    private func removeWhitelistedAudioTempFiles() {
+        let fm = FileManager.default
+        let tmpURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        guard let items = try? fm.contentsOfDirectory(
+            at: tmpURL,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: .skipsHiddenFiles
+        ) else { return }
+
+        let now = Date()
+        for item in items where isWhitelistedAudioTempItem(item) {
+            if let attrs = try? item.resourceValues(forKeys: [.contentModificationDateKey]),
+               let modDate = attrs.contentModificationDate,
+               now.timeIntervalSince(modDate) < Self.activeTempGraceInterval {
+                // Skip recently modified temp files to avoid deleting an active AVPlayer stream buffer
+                continue
+            }
+            try? fm.removeItem(at: item)
+        }
+    }
+
+    private func whitelistedAudioTempSize(in tmpURL: URL) -> Int64 {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(
+            at: tmpURL,
+            includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
+            options: .skipsHiddenFiles
+        ) else { return 0 }
+
+        var total: Int64 = 0
+        for item in items where isWhitelistedAudioTempItem(item) {
+            if let attrs = try? item.resourceValues(forKeys: [.isDirectoryKey]),
+               attrs.isDirectory == true {
+                total += directorySize(url: item)
+            } else {
+                total += fileSize(url: item)
+            }
+        }
+        return total
+    }
+
+    private func fileSize(url: URL) -> Int64 {
+        guard let attrs = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              let size = attrs.fileSize else {
+            return 0
+        }
+        return Int64(size)
     }
 
     // MARK: - Private Helpers

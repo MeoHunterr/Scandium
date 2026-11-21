@@ -9,8 +9,6 @@ enum KeychainHelper {
 
     @discardableResult
     static func save(key: String, data: Data) -> Bool {
-        delete(key: key)
-
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -20,6 +18,19 @@ enum KeychainHelper {
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            let searchQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: key
+            ]
+            let updateAttributes: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            ]
+            let updateStatus = SecItemUpdate(searchQuery as CFDictionary, updateAttributes as CFDictionary)
+            return updateStatus == errSecSuccess
+        }
         return status == errSecSuccess
     }
 

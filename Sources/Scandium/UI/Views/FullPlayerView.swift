@@ -12,6 +12,7 @@ struct FullPlayerView: View {
     @ObservedObject private var settings = AppSettings.shared
 
     @State private var waveformSamples: [Float] = []
+    @State private var waveformTask: Task<Void, Never>? = nil
     @State private var dragProgress: Double? = nil
     @State private var showQueueSheet: Bool = false
     @State private var selectedArtist: SoundCloudUser? = nil
@@ -102,6 +103,10 @@ struct FullPlayerView: View {
         }
         .onChange(of: player.currentTrack?.id) { _ in
             loadWaveform()
+        }
+        .onDisappear {
+            waveformTask?.cancel()
+            waveformTask = nil
         }
         .sheet(isPresented: $showQueueSheet) {
             QueueSheetView()
@@ -478,15 +483,23 @@ struct FullPlayerView: View {
     // MARK: - Waveform Loading
 
     private func loadWaveform() {
+        waveformTask?.cancel()
+        waveformTask = nil
+        waveformSamples = []
+
         guard let track = player.currentTrack else { return }
-        Task {
+        let targetTrackID = track.id
+
+        waveformTask = Task {
             do {
                 let samples = try await api.getWaveformData(for: track)
                 await MainActor.run {
+                    guard !Task.isCancelled, self.player.currentTrack?.id == targetTrackID else { return }
                     self.waveformSamples = samples
                 }
             } catch {
                 await MainActor.run {
+                    guard !Task.isCancelled, self.player.currentTrack?.id == targetTrackID else { return }
                     self.waveformSamples = []
                 }
             }

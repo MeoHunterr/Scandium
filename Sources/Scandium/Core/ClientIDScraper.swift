@@ -61,6 +61,13 @@ final class ClientIDScraper: ObservableObject {
     private let session: URLSession
     private let taskLock = NSLock()
     private var refreshTask: Task<String, Error>?
+    private var consecutiveManualAuthFailures: Int = 0
+    private var isManualTemporarilyBypassed: Bool = false
+
+    static func isValidClientIDFormat(_ id: String) -> Bool {
+        guard id.count == clientIDLength else { return false }
+        return id.range(of: #"^[A-Za-z0-9]{32}$"#, options: .regularExpression) != nil
+    }
 
     // MARK: - Init
 
@@ -82,10 +89,28 @@ final class ClientIDScraper: ObservableObject {
 
     // MARK: - Public API
 
+    private func isManualBypassed() -> Bool {
+        taskLock.lock()
+        defer { taskLock.unlock() }
+        return isManualTemporarilyBypassed
+    }
+
+    private func recordManualAuthFailureAndCheckShouldReturnManual() -> Bool {
+        taskLock.lock()
+        defer { taskLock.unlock() }
+        guard !isManualTemporarilyBypassed else { return false }
+        consecutiveManualAuthFailures += 1
+        if consecutiveManualAuthFailures >= 2 {
+            isManualTemporarilyBypassed = true
+            return false
+        }
+        return true
+    }
+
     /// Returns a valid client_id using manual/cache first. If nil, triggers a fresh scrape.
     @discardableResult
     func getClientID() async throws -> String {
-        if let manual = Self.loadManualClientID() {
+        if !isManualBypassed(), let manual = Self.loadManualClientID() {
             await MainActor.run {
                 self.clientID = manual
                 self.status = .manual
@@ -101,7 +126,7 @@ final class ClientIDScraper: ObservableObject {
             return cached
         }
 
-        // No manual override, no valid cache — must scrape
+        // No manual override (or temporarily bypassed after 401/403), no valid cache — must scrape
         return try await refreshClientID()
     }
 
@@ -152,9 +177,11 @@ final class ClientIDScraper: ObservableObject {
     }
 
     /// Forces a fresh scrape across all endpoints. Throws on failure (no hardcoded fallback IDs).
+    /// If a manual client_id repeatedly causes 401/403, temporarily bypasses it to scrape a fresh ID.
     @discardableResult
     func refreshClientID() async throws -> String {
-        if let manual = Self.loadManualClientID() {
+        if let manual = Self.loadManualClientID(),
+           recordManualAuthFailureAndCheckShouldReturnManual() {
             await MainActor.run {
                 self.clientID = manual
                 self.status = .manual
@@ -169,23 +196,46 @@ final class ClientIDScraper: ObservableObject {
     }
 
     /// Sets or removes manual client_id override from Settings.
-    func setManualClientID(_ id: String?) {
-        if let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), id.count == Self.clientIDLength {
-            UserDefaults.standard.set(id, forKey: Self.manualOverrideKey)
-            self.clientID = id
-            self.status = .manual
-            self.lastError = nil
-        } else {
+    /// Accepts only strings matching `^[A-Za-z0-9]{32}$`.
+    @discardableResult
+    func setManualClientID(_ id: String?) -> Bool {
+        let trimmed = id?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if trimmed.isEmpty {
+            taskLock.lock()
+            consecutiveManualAuthFailures = 0
+            isManualTemporarilyBypassed = false
+            taskLock.unlock()
+
             UserDefaults.standard.removeObject(forKey: Self.manualOverrideKey)
             if let cached = Self.loadCachedClientID() {
                 self.clientID = cached
                 self.status = .cached
             } else {
-                // No cache — no hardcoded fallback
                 self.clientID = nil
                 self.status = .noClientID
             }
+            return true
         }
+
+        guard Self.isValidClientIDFormat(trimmed) else {
+            self.lastError = AppSettings.shared.loc(
+                "Client ID không hợp lệ (cần đúng 32 ký tự chữ và số).",
+                "Invalid Client ID (must be exactly 32 alphanumeric characters)."
+            )
+            return false
+        }
+
+        taskLock.lock()
+        consecutiveManualAuthFailures = 0
+        isManualTemporarilyBypassed = false
+        taskLock.unlock()
+
+        UserDefaults.standard.set(trimmed, forKey: Self.manualOverrideKey)
+        self.clientID = trimmed
+        self.status = .manual
+        self.lastError = nil
+        return true
     }
 
     var manualClientID: String? {
@@ -198,6 +248,11 @@ final class ClientIDScraper: ObservableObject {
 
     /// Clears cached client_id, forcing re-scrape on next request.
     func clearCache() {
+        taskLock.lock()
+        consecutiveManualAuthFailures = 0
+        isManualTemporarilyBypassed = false
+        taskLock.unlock()
+
         UserDefaults.standard.removeObject(forKey: Self.cacheKey)
         UserDefaults.standard.removeObject(forKey: Self.cacheTimestampKey)
         if !isManualOverride {
@@ -377,14 +432,14 @@ final class ClientIDScraper: ObservableObject {
     // MARK: - Cache Helpers
 
     private static func loadCachedClientID() -> String? {
-        let id = UserDefaults.standard.string(forKey: cacheKey)
-        guard let id = id, id.count == clientIDLength else { return nil }
+        guard let id = UserDefaults.standard.string(forKey: cacheKey),
+              isValidClientIDFormat(id) else { return nil }
         return id
     }
 
     private static func loadManualClientID() -> String? {
-        let id = UserDefaults.standard.string(forKey: manualOverrideKey)
-        guard let id = id, id.count == clientIDLength else { return nil }
+        guard let id = UserDefaults.standard.string(forKey: manualOverrideKey),
+              isValidClientIDFormat(id) else { return nil }
         return id
     }
 

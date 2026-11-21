@@ -15,8 +15,8 @@ struct FloatingMiniPlayer: View {
     var body: some View {
         if let track = player.currentTrack {
             ZStack(alignment: .bottom) {
-                // Main Container Button (tapping anywhere opens Full Player)
-                Button(action: onTap) {
+                HStack(spacing: 12) {
+                    // Tappable info area (artwork + track title/artist) opens Full Player
                     HStack(spacing: 12) {
                         // Left: 40x40 Square Artwork, 6pt corner radius, clipped
                         CachedAsyncImage(
@@ -40,54 +40,57 @@ struct FloatingMiniPlayer: View {
                                 .lineLimit(1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-
-                        // Right Controls: Heart + Play/Pause + Next
-                        HStack(spacing: 12) {
-                            // Minimal Heart
-                            Button(action: {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                    library.toggleLike(track: track)
-                                }
-                            }) {
-                                let isLiked = library.isLiked(track: track)
-                                Image(systemName: isLiked ? "heart.fill" : "heart")
-                                    .font(.system(size: 17, weight: .medium))
-                                    .foregroundColor(isLiked ? ScandiumTheme.spotifyGreen : ScandiumTheme.subtext)
-                                    .frame(width: 28, height: 28)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(PlainButtonStyle())
-
-                            // Minimal Play / Pause
-                            Button(action: {
-                                player.togglePlayPause()
-                            }) {
-                                Image(systemName: player.playbackState.isPlaying ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(ScandiumTheme.textPrimary)
-                                    .frame(width: 32, height: 32)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(PlainButtonStyle())
-
-                            // Minimal Next
-                            Button(action: {
-                                player.nextTrack()
-                            }) {
-                                Image(systemName: "forward.fill")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(ScandiumTheme.textPrimary)
-                                    .frame(width: 32, height: 32)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        }
                     }
-                    .padding(.horizontal, 10)
-                    .frame(height: 56)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
+                    .onTapGesture {
+                        onTap()
+                    }
+
+                    // Right Controls: Heart + Play/Pause + Next (separate from tap area)
+                    HStack(spacing: 12) {
+                        // Minimal Heart
+                        Button(action: {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                library.toggleLike(track: track)
+                            }
+                        }) {
+                            let isLiked = library.isLiked(track: track)
+                            Image(systemName: isLiked ? "heart.fill" : "heart")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundColor(isLiked ? ScandiumTheme.spotifyGreen : ScandiumTheme.subtext)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        // Minimal Play / Pause
+                        Button(action: {
+                            player.togglePlayPause()
+                        }) {
+                            Image(systemName: player.playbackState.isPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(ScandiumTheme.textPrimary)
+                                .frame(width: 32, height: 32)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        // Minimal Next
+                        Button(action: {
+                            player.nextTrack()
+                        }) {
+                            Image(systemName: "forward.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(ScandiumTheme.textPrimary)
+                                .frame(width: 32, height: 32)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
                 }
-                .buttonStyle(PlainButtonStyle())
+                .padding(.horizontal, 10)
+                .frame(height: 56)
 
                 // Bottom 2pt progress line
                 GeometryReader { geo in

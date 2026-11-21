@@ -34,6 +34,9 @@ struct SearchView: View {
     @State private var hasSearched: Bool = false
     @State private var selectedFilter: String = ""
     @State private var searchHistory: [String] = []
+    @State private var searchTask: Task<Void, Never>? = nil
+    @State private var loadMoreTask: Task<Void, Never>? = nil
+    @State private var searchGeneration: Int = 0
 
     @ObservedObject private var settings = AppSettings.shared
 
@@ -221,9 +224,17 @@ struct SearchView: View {
 
             if !searchText.isEmpty {
                 Button(action: {
+                    searchTask?.cancel()
+                    searchTask = nil
+                    loadMoreTask?.cancel()
+                    loadMoreTask = nil
+                    searchGeneration += 1
                     searchText = ""
                     tracks = []
                     artists = []
+                    nextHref = nil
+                    isLoading = false
+                    isLoadingMore = false
                     selectedArtist = nil
                     showArtistDetail = false
                     hasSearched = false
@@ -256,6 +267,14 @@ struct SearchView: View {
             ForEach(SearchScope.allCases, id: \.self) { scope in
                 Button(action: {
                     if selectedScope != scope {
+                        searchTask?.cancel()
+                        searchTask = nil
+                        loadMoreTask?.cancel()
+                        loadMoreTask = nil
+                        searchGeneration += 1
+                        nextHref = nil
+                        isLoading = false
+                        isLoadingMore = false
                         selectedScope = scope
                         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !trimmed.isEmpty {
@@ -296,9 +315,17 @@ struct SearchView: View {
                         if tag != defaultTag {
                             triggerSearchKeyword(tag)
                         } else {
+                            searchTask?.cancel()
+                            searchTask = nil
+                            loadMoreTask?.cancel()
+                            loadMoreTask = nil
+                            searchGeneration += 1
                             searchText = ""
                             tracks = []
                             artists = []
+                            nextHref = nil
+                            isLoading = false
+                            isLoadingMore = false
                             hasSearched = false
                             errorMessage = nil
                         }
@@ -709,20 +736,37 @@ struct SearchView: View {
         guard !trimmed.isEmpty else { return }
         saveSearchHistoryItem(trimmed)
 
+        searchTask?.cancel()
+        loadMoreTask?.cancel()
+        loadMoreTask = nil
+        searchGeneration += 1
+        let generation = searchGeneration
+        let scope = selectedScope
+
+        nextHref = nil
+        isLoadingMore = false
         isLoading = true
         errorMessage = nil
         hasSearched = true
 
-        if selectedScope == .artists {
-            Task {
+        if scope == .artists {
+            searchTask = Task {
                 do {
                     let result = try await api.searchUsers(query: trimmed)
                     await MainActor.run {
+                        guard !Task.isCancelled,
+                              self.searchGeneration == generation,
+                              self.selectedScope == scope,
+                              self.searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
                         self.artists = result
                         self.isLoading = false
                     }
                 } catch {
                     await MainActor.run {
+                        guard !Task.isCancelled,
+                              self.searchGeneration == generation,
+                              self.selectedScope == scope,
+                              self.searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
                         self.errorMessage = error.localizedDescription
                         self.isLoading = false
                     }
@@ -731,16 +775,24 @@ struct SearchView: View {
             return
         }
 
-        Task {
+        searchTask = Task {
             do {
                 let response = try await api.searchTracks(query: trimmed)
                 await MainActor.run {
+                    guard !Task.isCancelled,
+                          self.searchGeneration == generation,
+                          self.selectedScope == scope,
+                          self.searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
                     self.tracks = deduplicateTracks(response.collection)
                     self.nextHref = response.nextHref
                     self.isLoading = false
                 }
             } catch {
                 await MainActor.run {
+                    guard !Task.isCancelled,
+                          self.searchGeneration == generation,
+                          self.selectedScope == scope,
+                          self.searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
                     self.errorMessage = error.localizedDescription
                     self.isLoading = false
                 }
@@ -750,18 +802,30 @@ struct SearchView: View {
 
     private func loadMoreResults() {
         guard selectedScope == .tracks, let href = nextHref, !isLoadingMore else { return }
+        let generation = searchGeneration
+        let scope = selectedScope
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         isLoadingMore = true
 
-        Task {
+        loadMoreTask?.cancel()
+        loadMoreTask = Task {
             do {
                 let response = try await api.searchTracksNextPage(nextHref: href)
                 await MainActor.run {
+                    guard !Task.isCancelled,
+                          self.searchGeneration == generation,
+                          self.selectedScope == scope,
+                          self.searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
                     self.tracks = deduplicateTracks(self.tracks + response.collection)
                     self.nextHref = response.nextHref
                     self.isLoadingMore = false
                 }
             } catch {
                 await MainActor.run {
+                    guard !Task.isCancelled,
+                          self.searchGeneration == generation,
+                          self.selectedScope == scope,
+                          self.searchText.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
                     self.isLoadingMore = false
                 }
             }

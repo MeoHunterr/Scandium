@@ -117,14 +117,49 @@ final class SoundCloudAPI: ObservableObject {
 
     /// Resolves any SoundCloud URL (e.g. soundcloud.com/username or track permalink)
     func resolveURL(url: String) async throws -> SoundCloudUser {
+        let cleanInput = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanInput.isEmpty else {
+            throw APIError.invalidURL(url)
+        }
+
+        let candidateString: String
+        if cleanInput.lowercased().hasPrefix("http://") || cleanInput.lowercased().hasPrefix("https://") {
+            candidateString = cleanInput
+        } else if cleanInput.lowercased().hasPrefix("soundcloud.com/") || cleanInput.lowercased().contains(".soundcloud.com/") {
+            candidateString = "https://\(cleanInput)"
+        } else {
+            let trimmedPath = cleanInput.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            candidateString = "https://soundcloud.com/\(trimmedPath)"
+        }
+
+        guard var targetComponents = URLComponents(string: candidateString),
+              let scheme = targetComponents.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              let host = targetComponents.host?.lowercased(),
+              host == "soundcloud.com" || host.hasSuffix(".soundcloud.com") else {
+            throw APIError.invalidURL(url)
+        }
+        targetComponents.scheme = "https"
+
+        guard let normalizedTargetURL = targetComponents.string else {
+            throw APIError.invalidURL(url)
+        }
+
         let clientID = try await scraper.getClientID()
-        let cleanURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fullURL = cleanURL.hasPrefix("http") ? cleanURL : "https://soundcloud.com/\(cleanURL)"
-        let encoded = fullURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? fullURL
-        let urlString = "\(Self.baseURL)/resolve?url=\(encoded)&client_id=\(clientID)"
+        guard var resolveComponents = URLComponents(string: "\(Self.baseURL)/resolve") else {
+            throw APIError.invalidURL(Self.baseURL)
+        }
+        resolveComponents.queryItems = [
+            URLQueryItem(name: "url", value: normalizedTargetURL),
+            URLQueryItem(name: "client_id", value: clientID)
+        ]
+
+        guard let finalURLString = resolveComponents.string else {
+            throw APIError.invalidURL(url)
+        }
 
         return try await performRequest(
-            urlString: urlString,
+            urlString: finalURLString,
             decodeAs: SoundCloudUser.self,
             retryCount: 0
         )
@@ -228,6 +263,7 @@ final class SoundCloudAPI: ObservableObject {
         var visitedURLs = Set<String>()
 
         while let currentURL = nextURL, !currentURL.isEmpty {
+            try Task.checkCancellation()
             if visitedURLs.contains(currentURL) {
                 break
             }
@@ -237,6 +273,7 @@ final class SoundCloudAPI: ObservableObject {
                 urlString: currentURL,
                 oauthToken: oauthToken
             )
+            try Task.checkCancellation()
 
             if !pageTracks.isEmpty {
                 allTracks.append(contentsOf: pageTracks)
@@ -251,7 +288,7 @@ final class SoundCloudAPI: ObservableObject {
             nextURL = next
 
             if delayNanoseconds > 0 {
-                try? await Task.sleep(nanoseconds: delayNanoseconds)
+                try await Task.sleep(nanoseconds: delayNanoseconds)
             }
         }
 
@@ -390,6 +427,7 @@ final class SoundCloudAPI: ObservableObject {
         var visitedURLs = Set<String>()
 
         while let currentURL = nextURL, !currentURL.isEmpty {
+            try Task.checkCancellation()
             if visitedURLs.contains(currentURL) {
                 break
             }
@@ -399,6 +437,7 @@ final class SoundCloudAPI: ObservableObject {
                 urlString: currentURL,
                 oauthToken: oauthToken
             )
+            try Task.checkCancellation()
 
             if !pagePlaylists.isEmpty {
                 allPlaylists.append(contentsOf: pagePlaylists)
@@ -413,7 +452,7 @@ final class SoundCloudAPI: ObservableObject {
             nextURL = next
 
             if delayNanoseconds > 0 {
-                try? await Task.sleep(nanoseconds: delayNanoseconds)
+                try await Task.sleep(nanoseconds: delayNanoseconds)
             }
         }
 
@@ -428,6 +467,7 @@ final class SoundCloudAPI: ObservableObject {
         onPage: (([SoundCloudPlaylist]) async -> Void)? = nil
     ) async throws -> [SoundCloudPlaylist] {
         let clientID = try await scraper.getClientID()
+        var lastError: Error?
 
         // 1. If userID is available, fetch liked_and_owned with OAuth header
         // This endpoint returns owned (public & private) + liked playlists!
@@ -442,7 +482,11 @@ final class SoundCloudAPI: ObservableObject {
                 if !results.isEmpty {
                     return results
                 }
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
+                if Task.isCancelled { throw CancellationError() }
+                lastError = error
                 print("[SoundCloudAPI] liked_and_owned error: \(error.localizedDescription)")
             }
         }
@@ -458,7 +502,14 @@ final class SoundCloudAPI: ObservableObject {
             if !results.isEmpty {
                 return results
             }
+            if userID == nil {
+                return []
+            }
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
+            if Task.isCancelled { throw CancellationError() }
+            lastError = error
             print("[SoundCloudAPI] /me/playlists error: \(error.localizedDescription)")
         }
 
@@ -472,6 +523,9 @@ final class SoundCloudAPI: ObservableObject {
             )
         }
 
+        if let error = lastError {
+            throw error
+        }
         return []
     }
 
@@ -770,7 +824,8 @@ final class SoundCloudAPI: ObservableObject {
             throw APIError.unsupportedAudioCodec
         }
 
-        let sorted = prioritizeTranscodings(compatibleTranscodings)
+        let qualitySetting = AppSettings.shared.audioQuality
+        let sorted = prioritizeTranscodings(compatibleTranscodings, qualitySetting: qualitySetting)
 
         var lastError: Error = APIError.noStreamURL
 
@@ -787,38 +842,85 @@ final class SoundCloudAPI: ObservableObject {
         throw lastError
     }
 
-    /// Sorts transcodings by strict priority:
-    /// Progressive audio/mpeg -> HLS audio/mpeg -> HLS audio/mp4 (AAC).
-    private func prioritizeTranscodings(_ transcodings: [Transcoding]) -> [Transcoding] {
+    /// Sorts transcodings according to user's `AudioQualitySetting` while preserving
+    /// iOS 15 compatibility (ogg/opus already filtered out).
+    private func prioritizeTranscodings(
+        _ transcodings: [Transcoding],
+        qualitySetting: AudioQualitySetting
+    ) -> [Transcoding] {
         transcodings.sorted { a, b in
-            let scoreA = transcodingPriority(a)
-            let scoreB = transcodingPriority(b)
+            let scoreA = transcodingPriority(a, qualitySetting: qualitySetting)
+            let scoreB = transcodingPriority(b, qualitySetting: qualitySetting)
             return scoreA > scoreB
         }
     }
 
-    private func transcodingPriority(_ transcoding: Transcoding) -> Int {
+    private func transcodingPriority(
+        _ transcoding: Transcoding,
+        qualitySetting: AudioQualitySetting
+    ) -> Int {
         var score = 0
         let mime = transcoding.format.mimeType.lowercased()
+        let preset = transcoding.preset?.lowercased() ?? ""
+        let isHQ = transcoding.quality?.lowercased() == "hq" || preset.contains("256")
+        let isAAC = mime.contains("mp4") || mime.contains("aac")
+        let isMP3 = mime.contains("mpeg")
 
-        // Strict priority: Progressive audio/mpeg -> HLS audio/mpeg -> HLS audio/mp4 (AAC)
-        if transcoding.isProgressive && mime.contains("mpeg") {
-            score = 300
-        } else if transcoding.isHLS && mime.contains("mpeg") {
-            score = 200
-        } else if (transcoding.isHLS || transcoding.isProgressive) && (mime.contains("mp4") || mime.contains("aac")) {
-            score = 100
-        } else {
-            score = 10
-        }
-
-        // Prefer non-snipped full stream over snipped preview
+        // Always strongly prefer full non-snipped stream over snipped preview
         if transcoding.snipped != true {
-            score += 50
+            score += 1000
         }
 
-        if transcoding.quality == "hq" {
-            score += 5
+        switch qualitySetting {
+        case .high:
+            // Prioritize HQ / AAC 256kbps HLS -> HLS MP3 -> Progressive MP3
+            if isHQ {
+                score += 400
+            }
+            if isAAC && isHQ {
+                score += 300
+            } else if transcoding.isHLS && isAAC {
+                score += 250
+            } else if transcoding.isHLS && isMP3 {
+                score += 220
+            } else if transcoding.isProgressive && isMP3 {
+                score += 200
+            } else {
+                score += 50
+            }
+
+        case .standard:
+            // Balanced: Progressive MP3 -> HLS MP3 -> HLS AAC
+            if transcoding.isProgressive && isMP3 {
+                score += 300
+            } else if transcoding.isHLS && isMP3 {
+                score += 220
+            } else if isAAC {
+                score += 120
+            } else {
+                score += 20
+            }
+            if !isHQ {
+                score += 25
+            }
+
+        case .saver:
+            // Data Saver: lower-bitrate SQ / Progressive MP3 first, avoid HQ 256kbps when possible
+            if !isHQ {
+                score += 300
+            }
+            if preset.contains("64") || preset.contains("abr") || preset.contains("mp3_0") {
+                score += 120
+            }
+            if transcoding.isProgressive && isMP3 {
+                score += 220
+            } else if transcoding.isHLS && isMP3 {
+                score += 160
+            } else if isAAC {
+                score += 80
+            } else {
+                score += 20
+            }
         }
 
         return score

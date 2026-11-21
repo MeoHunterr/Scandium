@@ -9,6 +9,7 @@ import AVFoundation
 import MediaPlayer
 import Combine
 
+@MainActor
 final class AudioPlayerEngine: ObservableObject {
 
     // MARK: - Playback State Enum
@@ -57,6 +58,11 @@ final class AudioPlayerEngine: ObservableObject {
 
     /// Guards against running heavy setup more than once
     private var isSetup: Bool = false
+
+    /// Limits consecutive auto-skip attempts on stream errors to prevent infinite loops offline
+    private var consecutiveAutoSkipCount: Int = 0
+    private static let maxConsecutiveAutoSkips: Int = 3
+    private var isPerformingAutoSkip: Bool = false
 
     // MARK: - Dependencies
 
@@ -118,12 +124,14 @@ final class AudioPlayerEngine: ObservableObject {
     private func setupPersistentTimeObserver() {
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            guard let self = self else { return }
             let seconds = CMTimeGetSeconds(time)
-            if seconds.isFinite && seconds >= 0 {
-                self.currentTime = seconds
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                if seconds.isFinite && seconds >= 0 {
+                    self.currentTime = seconds
+                }
+                self.updateBufferedTime()
             }
-            self.updateBufferedTime()
         }
     }
 
@@ -132,6 +140,9 @@ final class AudioPlayerEngine: ObservableObject {
     /// Plays a track by resolving its stream URL and replacing the player's current item.
     func play(track: Track) {
         setupIfNeeded()
+        if !isPerformingAutoSkip {
+            consecutiveAutoSkipCount = 0
+        }
 
         // 1. Cancel any active loading/stream resolution tasks
         currentLoadTask?.cancel()
@@ -153,22 +164,13 @@ final class AudioPlayerEngine: ObservableObject {
             currentIndex = 0
         }
 
-        let updateState = { [weak self] in
-            guard let self = self else { return }
-            self.currentTrack = track
-            self.playbackState = .loading
-            self.currentTime = 0
-            self.duration = track.durationInSeconds
-            self.bufferedTime = 0
-            self.artworkImage = nil
-            self.updateNowPlayingInfo(track: track)
-        }
-
-        if Thread.isMainThread {
-            updateState()
-        } else {
-            DispatchQueue.main.async(execute: updateState)
-        }
+        self.currentTrack = track
+        self.playbackState = .loading
+        self.currentTime = 0
+        self.duration = track.durationInSeconds
+        self.bufferedTime = 0
+        self.artworkImage = nil
+        self.updateNowPlayingInfo(track: track)
 
         LibraryManager.shared.addToRecentlyPlayed(track: track)
         fetchArtworkForNowPlaying(track: track)
@@ -218,13 +220,8 @@ final class AudioPlayerEngine: ObservableObject {
 
         setupItemObservers(item: newItem)
 
+        playbackState = .loading
         player.replaceCurrentItem(with: newItem)
-        player.play()
-        if playbackRate != 1.0 {
-            player.rate = playbackRate
-        }
-        playbackState = .playing
-
         updateNowPlayingInfo(track: track)
     }
 
@@ -234,7 +231,7 @@ final class AudioPlayerEngine: ObservableObject {
         item.publisher(for: \.status)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
-                guard let self = self else { return }
+                guard let self = self, self.playerItem === item else { return }
                 switch status {
                 case .readyToPlay:
                     let itemDuration = CMTimeGetSeconds(item.duration)
@@ -251,6 +248,15 @@ final class AudioPlayerEngine: ObservableObject {
                             self.handleStreamError("No playable audio track found in stream.")
                             return
                         }
+                    }
+                    self.consecutiveAutoSkipCount = 0
+                    if self.playbackState == .loading {
+                        self.player.play()
+                        if self.playbackRate != 1.0 {
+                            self.player.rate = self.playbackRate
+                        }
+                        self.playbackState = .playing
+                        self.updateNowPlayingElapsedTime()
                     }
                 case .failed:
                     let errorMsg = item.error?.localizedDescription ?? "Playback stream failed."
@@ -321,14 +327,15 @@ final class AudioPlayerEngine: ObservableObject {
             pause()
         case .paused:
             resume()
-        case .idle:
+        case .idle, .failed:
+            consecutiveAutoSkipCount = 0
             if let track = currentTrack {
                 play(track: track)
             } else if !queue.isEmpty {
                 play(at: currentIndex)
             }
-        default:
-            break
+        case .loading:
+            pause()
         }
     }
 
@@ -422,13 +429,13 @@ final class AudioPlayerEngine: ObservableObject {
             playerItem = nil
             playbackState = .loading
 
+            let existingIDs = Set(queue.map { $0.id })
             currentLoadTask = Task { [weak self] in
                 guard let self = self else { return }
                 var newTracks: [Track] = []
 
                 // Attempt 1: Fetch related tracks
                 if let related = try? await self.api.getRelatedTracks(trackID: current.id, limit: 10) {
-                    let existingIDs = Set(self.queue.map { $0.id })
                     newTracks = related.filter { !existingIDs.contains($0.id) }
                 }
 
@@ -438,7 +445,6 @@ final class AudioPlayerEngine: ObservableObject {
                 if newTracks.isEmpty {
                     let query = current.genre ?? current.user?.username ?? "Chill Hits"
                     if let searchRes = try? await self.api.searchTracks(query: query, limit: 10, offset: 0) {
-                        let existingIDs = Set(self.queue.map { $0.id })
                         newTracks = searchRes.collection.filter { !existingIDs.contains($0.id) }
                     }
                 }
@@ -448,7 +454,6 @@ final class AudioPlayerEngine: ObservableObject {
                 // Attempt 3: If still empty, search popular tracks ("Top Hits")
                 if newTracks.isEmpty {
                     if let searchRes = try? await self.api.searchTracks(query: "Top Hits", limit: 10, offset: 0) {
-                        let existingIDs = Set(self.queue.map { $0.id })
                         newTracks = searchRes.collection.filter { !existingIDs.contains($0.id) }
                     }
                 }
@@ -529,12 +534,22 @@ final class AudioPlayerEngine: ObservableObject {
         playbackState = .failed(message)
         updateNowPlayingElapsedTime()
 
-        // Auto-skip on stream error if configured and queue has more songs
-        if AppSettings.shared.autoSkipOnError && !queue.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                guard let self = self, case .failed = self.playbackState else { return }
-                self.nextTrack()
-            }
+        // Auto-skip on stream error if configured, queue has songs, and within consecutive skip limit
+        guard AppSettings.shared.autoSkipOnError,
+              !queue.isEmpty,
+              consecutiveAutoSkipCount < Self.maxConsecutiveAutoSkips else {
+            return
+        }
+
+        consecutiveAutoSkipCount += 1
+        let failedTrackID = currentTrack?.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            guard let self = self,
+                  case .failed = self.playbackState,
+                  self.currentTrack?.id == failedTrackID else { return }
+            self.isPerformingAutoSkip = true
+            self.nextTrack()
+            self.isPerformingAutoSkip = false
         }
     }
 
@@ -635,42 +650,39 @@ final class AudioPlayerEngine: ObservableObject {
     // MARK: - Sleep Timer Engine
 
     func setSleepTimer(_ option: SleepTimerOption) {
-        let scheduleBlock = { [weak self] in
-            guard let self = self else { return }
-            AppSettings.shared.sleepTimerOption = option
+        AppSettings.shared.sleepTimerOption = option
+        self.sleepTimer?.invalidate()
+        self.sleepTimer = nil
+
+        switch option {
+        case .off, .endOfTrack:
+            self.sleepTimerRemainingSeconds = 0
+        case .min15, .min30, .min45, .min60:
+            let totalSeconds = option.rawValue * 60
+            self.sleepTimerRemainingSeconds = totalSeconds
+            let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] t in
+                guard self != nil else {
+                    t.invalidate()
+                    return
+                }
+                Task { @MainActor [weak self] in
+                    self?.handleSleepTimerTick()
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            self.sleepTimer = timer
+        }
+    }
+
+    private func handleSleepTimerTick() {
+        if self.sleepTimerRemainingSeconds > 1 {
+            self.sleepTimerRemainingSeconds -= 1
+        } else {
+            self.sleepTimerRemainingSeconds = 0
             self.sleepTimer?.invalidate()
             self.sleepTimer = nil
-
-            switch option {
-            case .off, .endOfTrack:
-                self.sleepTimerRemainingSeconds = 0
-            case .min15, .min30, .min45, .min60:
-                let totalSeconds = option.rawValue * 60
-                self.sleepTimerRemainingSeconds = totalSeconds
-                let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] t in
-                    guard let self = self else {
-                        t.invalidate()
-                        return
-                    }
-                    if self.sleepTimerRemainingSeconds > 1 {
-                        self.sleepTimerRemainingSeconds -= 1
-                    } else {
-                        self.sleepTimerRemainingSeconds = 0
-                        t.invalidate()
-                        self.sleepTimer = nil
-                        AppSettings.shared.sleepTimerOption = .off
-                        self.pause()
-                    }
-                }
-                RunLoop.main.add(timer, forMode: .common)
-                self.sleepTimer = timer
-            }
-        }
-
-        if Thread.isMainThread {
-            scheduleBlock()
-        } else {
-            DispatchQueue.main.async(execute: scheduleBlock)
+            AppSettings.shared.sleepTimerOption = .off
+            self.pause()
         }
     }
 

@@ -7,7 +7,9 @@
 
 import sys
 import os
+import shutil
 import struct
+import tempfile
 
 # Load command constants
 LC_LOAD_DYLIB = 0x0c
@@ -91,57 +93,78 @@ def patch_binary(binary_path):
     total_patched = 0
     total_already_weak = 0
 
-    with open(binary_path, "r+b") as f:
-        magic_bytes = f.read(4)
-        if len(magic_bytes) < 4:
-            print("ERROR: File too small to be Mach-O binary", file=sys.stderr)
-            return False
+    abs_path = os.path.abspath(binary_path)
+    target_dir = os.path.dirname(abs_path)
+    fd, temp_path = tempfile.mkstemp(prefix=".patch_", suffix=".tmp", dir=target_dir)
+    os.close(fd)
 
-        magic_le = struct.unpack("<I", magic_bytes)[0]
-        magic_be = struct.unpack(">I", magic_bytes)[0]
+    try:
+        shutil.copy2(abs_path, temp_path)
 
-        if magic_le == MH_MAGIC_64:
-            # 64-bit Little Endian (arm64 iOS standard)
-            patched, already_weak = patch_mach_header(f, 0, is_64=True, endian="<")
-            total_patched += patched
-            total_already_weak += already_weak
+        with open(temp_path, "r+b") as f:
+            magic_bytes = f.read(4)
+            if len(magic_bytes) < 4:
+                print("ERROR: File too small to be Mach-O binary", file=sys.stderr)
+                return False
 
-        elif magic_be == MH_MAGIC_64:
-            # 64-bit Big Endian
-            patched, already_weak = patch_mach_header(f, 0, is_64=True, endian=">")
-            total_patched += patched
-            total_already_weak += already_weak
+            magic_le = struct.unpack("<I", magic_bytes)[0]
+            magic_be = struct.unpack(">I", magic_bytes)[0]
 
-        elif magic_le in (FAT_MAGIC, FAT_CIGAM, FAT_MAGIC_64, FAT_CIGAM_64):
-            # Universal / Fat Binary
-            is_cigam = magic_le in (FAT_CIGAM, FAT_CIGAM_64)
-            is_fat64 = magic_le in (FAT_MAGIC_64, FAT_CIGAM_64)
-            endian = ">" if is_cigam else "<"
-            f.seek(4)
-            nfat_arch = struct.unpack(f"{endian}I", f.read(4))[0]
-            print(f"Detected Fat binary with {nfat_arch} architectures")
-
-            for i in range(nfat_arch):
-                if is_fat64:
-                    f.seek(8 + i * 32)
-                    cputype, cpusubtype, offset, size, align = struct.unpack(f"{endian}QQQQQ", f.read(32))
-                else:
-                    f.seek(8 + i * 20)
-                    cputype, cpusubtype, offset, size, align = struct.unpack(f"{endian}IIIII", f.read(20))
-
-                # Check slice magic
-                f.seek(offset)
-                slice_magic = struct.unpack("<I", f.read(4))[0]
-                is_64 = slice_magic == MH_MAGIC_64
-                slice_endian = "<" if is_64 else ">"
-                patched, already_weak = patch_mach_header(f, offset, is_64=is_64, endian=slice_endian)
+            if magic_le == MH_MAGIC_64:
+                # 64-bit Little Endian (arm64 iOS standard)
+                patched, already_weak = patch_mach_header(f, 0, is_64=True, endian="<")
                 total_patched += patched
                 total_already_weak += already_weak
-        else:
-            print(f"ERROR: Unrecognized binary format (magic: 0x{magic_le:08X})", file=sys.stderr)
-            return False
 
-        f.flush()
+            elif magic_be == MH_MAGIC_64:
+                # 64-bit Big Endian
+                patched, already_weak = patch_mach_header(f, 0, is_64=True, endian=">")
+                total_patched += patched
+                total_already_weak += already_weak
+
+            elif magic_le in (FAT_MAGIC, FAT_CIGAM, FAT_MAGIC_64, FAT_CIGAM_64):
+                # Universal / Fat Binary
+                is_cigam = magic_le in (FAT_CIGAM, FAT_CIGAM_64)
+                is_fat64 = magic_le in (FAT_MAGIC_64, FAT_CIGAM_64)
+                endian = ">" if is_cigam else "<"
+                f.seek(4)
+                nfat_arch = struct.unpack(f"{endian}I", f.read(4))[0]
+                print(f"Detected Fat binary with {nfat_arch} architectures")
+
+                for i in range(nfat_arch):
+                    if is_fat64:
+                        f.seek(8 + i * 32)
+                        cputype, cpusubtype, offset, size, align = struct.unpack(f"{endian}QQQQQ", f.read(32))
+                    else:
+                        f.seek(8 + i * 20)
+                        cputype, cpusubtype, offset, size, align = struct.unpack(f"{endian}IIIII", f.read(20))
+
+                    # Check slice magic
+                    f.seek(offset)
+                    slice_magic = struct.unpack("<I", f.read(4))[0]
+                    is_64 = slice_magic == MH_MAGIC_64
+                    slice_endian = "<" if is_64 else ">"
+                    patched, already_weak = patch_mach_header(f, offset, is_64=is_64, endian=slice_endian)
+                    total_patched += patched
+                    total_already_weak += already_weak
+            else:
+                print(f"ERROR: Unrecognized binary format (magic: 0x{magic_le:08X})", file=sys.stderr)
+                return False
+
+            f.flush()
+            os.fsync(f.fileno())
+
+        shutil.copystat(abs_path, temp_path)
+        os.replace(temp_path, abs_path)
+    except Exception as exc:
+        print(f"ERROR: Failed to patch binary atomically: {exc}", file=sys.stderr)
+        return False
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
     print("--------------------------------------------------")
     print(f"Result: {total_patched} dylib(s) patched to LC_LOAD_WEAK_DYLIB")
