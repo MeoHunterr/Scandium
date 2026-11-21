@@ -37,11 +37,14 @@ struct LibraryView: View {
     @EnvironmentObject var library: LibraryManager
     @EnvironmentObject var player: AudioPlayerEngine
     @EnvironmentObject var api: SoundCloudAPI
+    @EnvironmentObject var scraper: ClientIDScraper
     @ObservedObject private var auth = SoundCloudAuthManager.shared
     @ObservedObject private var settings = AppSettings.shared
 
     @State private var selectedTab: LibraryTab = .liked
     @State private var selectedPlaylist: SoundCloudPlaylist?
+    @State private var selectedArtist: SoundCloudUser?
+    @State private var showArtistDetail: Bool = false
 
     init() {}
 
@@ -61,6 +64,18 @@ struct LibraryView: View {
                 .environmentObject(api)
                 .environmentObject(library)
         }
+        .background(
+            Color.clear
+                .sheet(isPresented: $showArtistDetail, onDismiss: { selectedArtist = nil }) {
+                    if let artist = selectedArtist {
+                        ArtistDetailSheetView(artist: artist)
+                            .environmentObject(api)
+                            .environmentObject(player)
+                            .environmentObject(library)
+                            .environmentObject(scraper)
+                    }
+                }
+        )
     }
 
     // MARK: - Header
@@ -199,6 +214,11 @@ struct LibraryView: View {
                     GlassTrackRow(
                         track: track,
                         isCurrentlyPlaying: player.currentTrack?.id == track.id,
+                        showLikeButton: true,
+                        onSelectArtist: { artist in
+                            selectedArtist = artist
+                            showArtistDetail = true
+                        },
                         onTap: {
                             let idx = library.likedTracks.firstIndex(where: { $0.id == track.id }) ?? 0
                             player.playQueue(library.likedTracks, startingAt: idx)
@@ -326,41 +346,52 @@ struct LibraryView: View {
         } else {
             LazyVStack(spacing: 8) {
                 ForEach(auth.userFollowings) { user in
-                    HStack(spacing: 12) {
-                        CachedAsyncImage(
-                            url: URL(string: user.avatarURL ?? ""),
-                            width: 50,
-                            height: 50,
-                            cornerRadius: 25
-                        )
+                    Button(action: {
+                        selectedArtist = user
+                        showArtistDetail = true
+                    }) {
+                        HStack(spacing: 12) {
+                            CachedAsyncImage(
+                                url: user.highResAvatarURL ?? (user.avatarURL.flatMap { URL(string: $0) }),
+                                width: 50,
+                                height: 50,
+                                cornerRadius: 25
+                            )
 
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 4) {
-                                Text(user.username)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundColor(ScandiumTheme.textPrimary)
-                                    .lineLimit(1)
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 4) {
+                                    Text(user.username)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundColor(ScandiumTheme.textPrimary)
+                                        .lineLimit(1)
 
-                                if user.verified == true {
-                                    Image(systemName: "checkmark.seal.fill")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(ScandiumTheme.spotifyGreen)
+                                    if user.verified == true {
+                                        Image(systemName: "checkmark.seal.fill")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(ScandiumTheme.spotifyGreen)
+                                    }
+                                }
+
+                                if let followers = user.followersCount {
+                                    Text("\(followers) \(settings.loc("người theo dõi", "followers"))")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(ScandiumTheme.subtext)
                                 }
                             }
 
-                            if let followers = user.followersCount {
-                                Text("\(followers) \(settings.loc("người theo dõi", "followers"))")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(ScandiumTheme.subtext)
-                            }
-                        }
+                            Spacer()
 
-                        Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(ScandiumTheme.subtext.opacity(0.5))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(ScandiumTheme.surfaceCard)
+                        .clipShape(RoundedRectangle(cornerRadius: ScandiumTheme.cornerRadiusMedium, style: .continuous))
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(ScandiumTheme.surfaceCard)
-                    .clipShape(RoundedRectangle(cornerRadius: ScandiumTheme.cornerRadiusMedium, style: .continuous))
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
         }
@@ -396,6 +427,11 @@ struct LibraryView: View {
                     GlassTrackRow(
                         track: track,
                         isCurrentlyPlaying: player.currentTrack?.id == track.id,
+                        showLikeButton: true,
+                        onSelectArtist: { artist in
+                            selectedArtist = artist
+                            showArtistDetail = true
+                        },
                         onTap: {
                             let idx = library.recentlyPlayed.firstIndex(where: { $0.id == track.id }) ?? 0
                             player.playQueue(library.recentlyPlayed, startingAt: idx)

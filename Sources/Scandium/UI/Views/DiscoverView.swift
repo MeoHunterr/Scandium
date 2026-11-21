@@ -2,6 +2,7 @@
 // Project: Scandium | Author: MeoHunter | License: GPL-3.0
 
 import SwiftUI
+import UIKit
 
 struct DiscoverView: View {
     @EnvironmentObject var api: SoundCloudAPI
@@ -55,12 +56,30 @@ struct DiscoverView: View {
                 // 2-Column Quick Picks Grid (Spotify style: 56pt height, #181818)
                 quickPicksSection
 
-                // Personalized Carousel (Gợi ý cá nhân theo tài khoản / Client ID / Thư viện)
+                // Following Stream Carousel (OAuth feed from followed artists)
+                if !store.followingTracks.isEmpty {
+                    carouselSection(
+                        title: settings.loc("Mới từ nghệ sĩ bạn theo dõi", "New from Artists You Follow"),
+                        subtitle: settings.loc("Bài hát mới và repost từ người bạn theo dõi", "Fresh tracks & reposts from artists you follow"),
+                        tracks: store.followingTracks
+                    )
+                }
+
+                // Personalized Carousel (Gợi ý cá nhân theo Seed Pool / Gu nhạc)
                 if !store.personalizedTracks.isEmpty || store.isLoading {
                     carouselSection(
                         title: store.personalizedTitle,
                         subtitle: store.personalizedSubtitle,
                         tracks: store.personalizedTracks
+                    )
+                }
+
+                // More from Favorite Artist Carousel
+                if !store.artistSpotlightTracks.isEmpty {
+                    carouselSection(
+                        title: store.artistSpotlightTitle,
+                        subtitle: store.artistSpotlightSubtitle,
+                        tracks: store.artistSpotlightTracks
                     )
                 }
 
@@ -70,17 +89,21 @@ struct DiscoverView: View {
                     tracks: store.trendingTracks
                 )
 
-                // Horizontal Carousel: Chill & R&B
-                carouselSection(
-                    title: settings.loc("Chill & R&B", "Chill & R&B"),
-                    tracks: store.chillTracks
-                )
+                // Horizontal Carousel: Dynamic Genre 1
+                if !store.genre1Tracks.isEmpty {
+                    carouselSection(
+                        title: store.genre1Title,
+                        tracks: store.genre1Tracks
+                    )
+                }
 
-                // Horizontal Carousel: Remix & EDM
-                carouselSection(
-                    title: settings.loc("Remix sôi động", "Remix & Dance"),
-                    tracks: store.remixTracks
-                )
+                // Horizontal Carousel: Dynamic Genre 2
+                if !store.genre2Tracks.isEmpty {
+                    carouselSection(
+                        title: store.genre2Title,
+                        tracks: store.genre2Tracks
+                    )
+                }
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 130) // Ensure content is never hidden behind floating player & tab bar
@@ -111,6 +134,7 @@ struct DiscoverView: View {
             HStack(spacing: 10) {
                 // Refresh / Reload Button
                 Button(action: {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     Task {
                         await store.refresh(api: api)
                     }
@@ -407,19 +431,60 @@ struct DiscoverView: View {
 final class DiscoverDataStore: ObservableObject {
     static let shared = DiscoverDataStore()
 
+    // Tier 1: Quick Picks & Seed-Sampled Personalized Recommendations
     @Published var quickPicks: [Track] = []
     @Published var personalizedTracks: [Track] = []
     @Published var personalizedTitle: String = "Made for You"
     @Published var personalizedSubtitle: String? = nil
+
+    // Tier 2: Authenticated Following Stream & Favorite Artist Spotlight
+    @Published var followingTracks: [Track] = []
+    @Published var artistSpotlightTracks: [Track] = []
+    @Published var artistSpotlightTitle: String = ""
+    @Published var artistSpotlightSubtitle: String? = nil
+
+    // Tier 3: Anti-repetition Global Trending & Dynamic Genres
     @Published var trendingTracks: [Track] = []
-    @Published var chillTracks: [Track] = []
-    @Published var remixTracks: [Track] = []
+    @Published var genre1Title: String = "Chill & R&B"
+    @Published var genre1Tracks: [Track] = []
+    @Published var genre2Title: String = "Remix & Dance"
+    @Published var genre2Tracks: [Track] = []
+
+    // Backward compatibility aliases
+    var chillTracks: [Track] {
+        get { genre1Tracks }
+        set { genre1Tracks = newValue }
+    }
+    var remixTracks: [Track] {
+        get { genre2Tracks }
+        set { genre2Tracks = newValue }
+    }
+
     @Published var isLoading: Bool = false
     @Published var isRefreshing: Bool = false
     @Published var error: String?
 
     private var hasLoaded: Bool = false
-    private let cacheKey = "scandium_discover_cached_payload_v1"
+    private let cacheKey = "scandium_discover_cached_payload_v2"
+    private let legacyCacheKey = "scandium_discover_cached_payload_v1"
+
+    struct GenreCategory {
+        let nameVI: String
+        let nameEN: String
+        let query: String
+    }
+
+    private static let genrePool: [GenreCategory] = [
+        GenreCategory(nameVI: "Electronic & EDM", nameEN: "Electronic & Dance", query: "Electronic Dance EDM"),
+        GenreCategory(nameVI: "Hip-Hop & Rap", nameEN: "Hip-Hop & Rap", query: "Hip-Hop Rap Trending"),
+        GenreCategory(nameVI: "Chill & R&B", nameEN: "Chill & R&B", query: "Chill R&B Soul"),
+        GenreCategory(nameVI: "Indie Khám Phá", nameEN: "Indie Discoveries", query: "Indie Alternative Pop"),
+        GenreCategory(nameVI: "Lo-Fi Học Tập & Thư Giãn", nameEN: "Lo-Fi Beats & Chill", query: "Lo-Fi Beats Chill Study"),
+        GenreCategory(nameVI: "Pop Thịnh Hành", nameEN: "Pop Hits", query: "Pop Hits Worldwide"),
+        GenreCategory(nameVI: "Rock & Alternative", nameEN: "Rock & Alternative", query: "Rock Alternative Hits"),
+        GenreCategory(nameVI: "Deep House & Club", nameEN: "Deep House & Club", query: "Deep House Club"),
+        GenreCategory(nameVI: "Ambient Thư Giãn", nameEN: "Ambient & Relaxation", query: "Ambient Relaxing Meditation")
+    ]
 
     private struct DiscoverCachePayload: Codable {
         let quickPicks: [Track]
@@ -429,6 +494,12 @@ final class DiscoverDataStore: ObservableObject {
         let trendingTracks: [Track]
         let chillTracks: [Track]
         let remixTracks: [Track]
+        var followingTracks: [Track]?
+        var artistSpotlightTracks: [Track]?
+        var artistSpotlightTitle: String?
+        var artistSpotlightSubtitle: String?
+        var genre1Title: String?
+        var genre2Title: String?
     }
 
     private init() {
@@ -436,7 +507,9 @@ final class DiscoverDataStore: ObservableObject {
     }
 
     private func loadCachedFeed() {
-        guard let data = UserDefaults.standard.data(forKey: cacheKey),
+        let ud = UserDefaults.standard
+        let data = ud.data(forKey: cacheKey) ?? ud.data(forKey: legacyCacheKey)
+        guard let data = data,
               let payload = try? JSONDecoder().decode(DiscoverCachePayload.self, from: data) else {
             return
         }
@@ -445,8 +518,14 @@ final class DiscoverDataStore: ObservableObject {
         self.personalizedTitle = payload.personalizedTitle
         self.personalizedSubtitle = payload.personalizedSubtitle
         self.trendingTracks = payload.trendingTracks
-        self.chillTracks = payload.chillTracks
-        self.remixTracks = payload.remixTracks
+        self.genre1Tracks = payload.chillTracks
+        self.genre2Tracks = payload.remixTracks
+        self.genre1Title = payload.genre1Title ?? "Chill & R&B"
+        self.genre2Title = payload.genre2Title ?? "Remix & Dance"
+        self.followingTracks = payload.followingTracks ?? []
+        self.artistSpotlightTracks = payload.artistSpotlightTracks ?? []
+        self.artistSpotlightTitle = payload.artistSpotlightTitle ?? ""
+        self.artistSpotlightSubtitle = payload.artistSpotlightSubtitle
         self.hasLoaded = true
     }
 
@@ -457,8 +536,14 @@ final class DiscoverDataStore: ObservableObject {
             personalizedTitle: personalizedTitle,
             personalizedSubtitle: personalizedSubtitle,
             trendingTracks: trendingTracks,
-            chillTracks: chillTracks,
-            remixTracks: remixTracks
+            chillTracks: genre1Tracks,
+            remixTracks: genre2Tracks,
+            followingTracks: followingTracks,
+            artistSpotlightTracks: artistSpotlightTracks,
+            artistSpotlightTitle: artistSpotlightTitle,
+            artistSpotlightSubtitle: artistSpotlightSubtitle,
+            genre1Title: genre1Title,
+            genre2Title: genre2Title
         )
         if let data = try? JSONEncoder().encode(payload) {
             UserDefaults.standard.set(data, forKey: cacheKey)
@@ -476,11 +561,9 @@ final class DiscoverDataStore: ObservableObject {
     }
 
     func loadInitialData(api: SoundCloudAPI, force: Bool = false) {
-        // If already loading, avoid duplicate triggers
         if isLoading && !force {
             return
         }
-
         Task {
             await loadData(api: api, force: force)
         }
@@ -488,7 +571,6 @@ final class DiscoverDataStore: ObservableObject {
 
     private func loadData(api: SoundCloudAPI, force: Bool) async {
         await MainActor.run {
-            // Only set fullscreen shimmer if we have no cached content to show
             if self.quickPicks.isEmpty && self.trendingTracks.isEmpty {
                 self.isLoading = true
             }
@@ -498,30 +580,59 @@ final class DiscoverDataStore: ObservableObject {
         let auth = SoundCloudAuthManager.shared
         let library = LibraryManager.shared
 
-        async let persTask = fetchPersonalizedTracks(api: api, auth: auth, library: library, force: force)
-        async let qpTask = fetchQuickPicks(api: api, auth: auth, library: library, force: force)
+        // PHASE 1: Personalized Seed Sampling, Global Charts & Following Feed (max ~3-4 concurrent requests)
+        async let seedTask = fetchRandomSeedRecommendations(api: api, auth: auth, library: library)
+        async let trendingTask = fetchTrendingCharts(api: api)
+        async let followingTask = fetchFollowingStreamTracks(api: api, auth: auth)
 
-        let isEn = AppSettings.shared.language == .english
-        let trendingQuery = isEn ? "Global Top Hits" : "Top Vietnam"
-        let trendingOffset = force ? Int.random(in: 0...5) : 0
-        let chillOffset = force ? Int.random(in: 0...5) : 0
-        let remixOffset = force ? Int.random(in: 0...5) : 0
+        let (seedResult, trendingResult, followingResult) = await (seedTask, trendingTask, followingTask)
 
-        async let trTask = safeSearch(api: api, query: trendingQuery, limit: 10, offset: trendingOffset)
-        async let chTask = safeSearch(api: api, query: isEn ? "Chill Vibes & R&B" : "Chill R&B", limit: 10, offset: chillOffset)
-        async let rmTask = safeSearch(api: api, query: isEn ? "EDM Festival Hits" : "Remix Lo-Fi", limit: 10, offset: remixOffset)
+        // PHASE 2: Favorite Artist Spotlight & 2 Dynamic Genre Carousels (max ~2-3 concurrent requests)
+        let selectedGenres = Array(Self.genrePool.shuffled().prefix(2))
+        async let artistTask = fetchFavoriteArtistSpotlight(api: api, auth: auth, library: library)
+        async let genre1Task = fetchGenreSection(api: api, genre: selectedGenres[0])
+        async let genre2Task = fetchGenreSection(api: api, genre: selectedGenres[1])
 
-        let (persResult, qpTracks, trTracks, chTracks, rmTracks) = await (persTask, qpTask, trTask, chTask, rmTask)
+        let (artistResult, g1Result, g2Result) = await (artistTask, genre1Task, genre2Task)
+
+        // Select Quick Picks:
+        // Prioritize fresh random sample from personalized recommendations; cold start fallback to trending
+        let qpCandidates: [Track]
+        if !seedResult.tracks.isEmpty {
+            qpCandidates = Array(seedResult.tracks.shuffled().prefix(5))
+        } else if !trendingResult.isEmpty {
+            qpCandidates = Array(trendingResult.shuffled().prefix(5))
+        } else {
+            qpCandidates = Array(g1Result.tracks.shuffled().prefix(5))
+        }
 
         await MainActor.run {
-            self.personalizedTracks = self.deduplicateTracks(persResult.tracks)
-            self.personalizedTitle = persResult.title
-            self.personalizedSubtitle = persResult.subtitle
+            self.quickPicks = self.deduplicateTracks(qpCandidates)
+            self.followingTracks = followingResult
 
-            if !qpTracks.isEmpty { self.quickPicks = self.deduplicateTracks(qpTracks) }
-            if !trTracks.isEmpty { self.trendingTracks = self.deduplicateTracks(trTracks) }
-            if !chTracks.isEmpty { self.chillTracks = self.deduplicateTracks(chTracks) }
-            if !rmTracks.isEmpty { self.remixTracks = self.deduplicateTracks(rmTracks) }
+            if !seedResult.tracks.isEmpty {
+                self.personalizedTracks = seedResult.tracks
+                self.personalizedTitle = seedResult.title
+                self.personalizedSubtitle = seedResult.subtitle
+            } else if !g1Result.tracks.isEmpty {
+                self.personalizedTracks = g1Result.tracks
+                self.personalizedTitle = g1Result.title
+                self.personalizedSubtitle = AppSettings.shared.language == .english ? "Curated discoveries for you" : "Tuyển tập khám phá dành riêng cho bạn"
+            }
+
+            self.artistSpotlightTracks = artistResult.tracks
+            self.artistSpotlightTitle = artistResult.title
+            self.artistSpotlightSubtitle = artistResult.subtitle
+
+            if !trendingResult.isEmpty {
+                self.trendingTracks = trendingResult
+            }
+
+            self.genre1Title = g1Result.title
+            self.genre1Tracks = g1Result.tracks
+
+            self.genre2Title = g2Result.title
+            self.genre2Tracks = g2Result.tracks
 
             self.isLoading = false
             self.hasLoaded = true
@@ -536,142 +647,185 @@ final class DiscoverDataStore: ObservableObject {
         }
     }
 
-    private func fetchQuickPicks(api: SoundCloudAPI, auth: SoundCloudAuthManager, library: LibraryManager, force: Bool) async -> [Track] {
-        var candidatePicks: [Track] = []
-        var seenIDs = Set<Int>()
+    // MARK: - Tier 1: Random Seed Sampling Engine
 
-        let userSeeds = (auth.userLikedTracks + library.likedTracks + library.recentlyPlayed).shuffled()
-        for track in userSeeds {
-            if seenIDs.insert(track.id).inserted {
-                candidatePicks.append(track)
-                if candidatePicks.count >= 3 { break }
+    private func fetchRandomSeedRecommendations(
+        api: SoundCloudAPI,
+        auth: SoundCloudAuthManager,
+        library: LibraryManager
+    ) async -> (title: String, subtitle: String?, tracks: [Track]) {
+        let isEn = AppSettings.shared.language == .english
+        var seeds: [Track] = []
+        var seedIDs = Set<Int>()
+
+        // 1. Pick up to 2 random tracks from recent 20 in recentlyPlayed
+        let recentPool = Array(library.recentlyPlayed.prefix(20)).shuffled()
+        for track in recentPool {
+            if seedIDs.insert(track.id).inserted {
+                seeds.append(track)
+                if seeds.count >= 2 { break }
             }
         }
 
-        let isEn = AppSettings.shared.language == .english
-        let queryPool = (isEn ? [
-            "Top Hits",
-            "Top Trending",
-            "EDM Festival",
-            "Acoustic Chill",
-            "Lo-Fi Beats",
-            "Indie Pop",
-            "Chill R&B",
-            "Deep House"
-        ] : [
-            "V-Pop Hits",
-            "Top Trending",
-            "EDM Festival",
-            "Acoustic Chill",
-            "Nhạc Trẻ Remix",
-            "Indie Việt",
-            "Chill R&B",
-            "Deep House"
-        ]).shuffled()
+        // 2. Pick up to 2 random tracks from entire likedTracks (shuffled to surface older favorites)
+        let likedPool = (library.likedTracks + (auth.isAuthenticated ? auth.userLikedTracks : [])).shuffled()
+        var likedAdded = 0
+        for track in likedPool {
+            if seedIDs.insert(track.id).inserted {
+                seeds.append(track)
+                likedAdded += 1
+                if likedAdded >= 2 { break }
+            }
+        }
 
-        for q in queryPool.prefix(2) {
-            let offset = force ? Int.random(in: 0...10) : 0
-            let fetched = await safeSearch(api: api, query: q, limit: 6, offset: offset)
-            for track in fetched {
-                if seenIDs.insert(track.id).inserted {
-                    candidatePicks.append(track)
+        guard !seeds.isEmpty else {
+            return (isEn ? "Discover Weekly" : "Khám phá âm nhạc", nil, [])
+        }
+
+        // Fetch related tracks in parallel with withTaskGroup (max 2-4 seeds)
+        var fetchedTracks: [Track] = []
+        await withTaskGroup(of: [Track].self) { group in
+            for seed in seeds {
+                group.addTask {
+                    do {
+                        return try await api.getRelatedTracks(trackID: seed.id, limit: 12)
+                    } catch {
+                        return []
+                    }
                 }
             }
+            for await list in group {
+                fetchedTracks.append(contentsOf: list)
+            }
         }
 
-        if candidatePicks.isEmpty {
-            let fallback = await safeSearch(api: api, query: "Top Hits", limit: 6, offset: 0)
-            return fallback
+        // Filter and reorder:
+        // - Deduplicate by ID
+        // - Defer songs in the last 15 of recentlyPlayed to the end
+        // - Shuffle final candidates
+        let recent15IDs = Set(library.recentlyPlayed.prefix(15).map(\.id))
+        var seenIDs = Set<Int>()
+        var freshTracks: [Track] = []
+        var deferredTracks: [Track] = []
+
+        for track in fetchedTracks {
+            guard seenIDs.insert(track.id).inserted else { continue }
+            if recent15IDs.contains(track.id) {
+                deferredTracks.append(track)
+            } else {
+                freshTracks.append(track)
+            }
         }
 
-        return Array(candidatePicks.prefix(6))
+        var result = freshTracks.shuffled()
+        result.append(contentsOf: deferredTracks)
+
+        let title = isEn ? "Made for You" : "Dành riêng cho bạn"
+        let subtitle: String?
+        if seeds.count >= 2 {
+            let names = seeds.prefix(2).map(\.title).joined(separator: ", ")
+            subtitle = isEn ? "Based on '\(names)' & your favorites" : "Lấy cảm hứng từ '\(names)' & bài hát bạn thích"
+        } else if let firstSeed = seeds.first {
+            subtitle = isEn ? "Based on '\(firstSeed.title)'" : "Lấy cảm hứng từ '\(firstSeed.title)'"
+        } else {
+            subtitle = isEn ? "Based on your music taste" : "Dựa trên gu âm nhạc của bạn"
+        }
+
+        return (title, subtitle, result)
     }
 
-    private func fetchPersonalizedTracks(api: SoundCloudAPI, auth: SoundCloudAuthManager, library: LibraryManager, force: Bool) async -> (title: String, subtitle: String?, tracks: [Track]) {
+    // MARK: - Tier 2: Real Following Feed & Favorite Artist Spotlight
+
+    private func fetchFollowingStreamTracks(api: SoundCloudAPI, auth: SoundCloudAuthManager) async -> [Track] {
+        guard auth.isAuthenticated, let token = auth.oauthToken, !token.isEmpty else {
+            return []
+        }
+        do {
+            let stream = try await api.getFollowingStream(oauthToken: token, limit: 20)
+            return deduplicateTracks(stream)
+        } catch {
+            return []
+        }
+    }
+
+    private func fetchFavoriteArtistSpotlight(
+        api: SoundCloudAPI,
+        auth: SoundCloudAuthManager,
+        library: LibraryManager
+    ) async -> (title: String, subtitle: String?, tracks: [Track]) {
         let isEn = AppSettings.shared.language == .english
+        let allTracks = library.likedTracks + library.recentlyPlayed + (auth.isAuthenticated ? auth.userLikedTracks : [])
+        var artistFrequency: [Int: (user: SoundCloudUser, count: Int)] = [:]
 
-        // Priority 1: User is logged in to SoundCloud with OAuth
-        if auth.isAuthenticated {
-            if let token = auth.oauthToken, !token.isEmpty {
-                do {
-                    let stream = try await api.getUserStream(oauthToken: token, limit: 12)
-                    if !stream.isEmpty {
-                        let username = auth.currentUser?.username ?? (isEn ? "you" : "bạn")
-                        let title = isEn ? "Feed for \(username)" : "Bảng tin của \(username)"
-                        let subtitle = isEn ? "New tracks from artists you follow" : "Bài hát mới từ nghệ sĩ bạn theo dõi"
-                        return (title, subtitle, stream)
-                    }
-                } catch {
-                    // Fall back to liked tracks
-                }
-            }
-
-            if let seed = auth.userLikedTracks.randomElement() {
-                do {
-                    let related = try await api.getRelatedTracks(trackID: seed.id, limit: 12)
-                    if !related.isEmpty {
-                        let title = isEn ? "Related Recommendations" : "Gợi ý liên quan"
-                        let subtitle = isEn ? "Based on '\(seed.title)' you liked" : "Dựa trên '\(seed.title)' bạn đã thích"
-                        return (title, subtitle, related)
-                    }
-                } catch {}
+        for track in allTracks {
+            guard let user = track.user, user.id > 0 else { continue }
+            if let existing = artistFrequency[user.id] {
+                artistFrequency[user.id] = (existing.user, existing.count + 1)
+            } else {
+                artistFrequency[user.id] = (user, 1)
             }
         }
 
-        // Priority 1.5: If user has followed artists, discover songs by their followed artists
-        if auth.isAuthenticated, !auth.userFollowings.isEmpty {
-            if let randomArtist = auth.userFollowings.randomElement() {
-                let artistTracks = await safeSearch(api: api, query: randomArtist.username, limit: 12, offset: 0)
-                if !artistTracks.isEmpty {
-                    let title = isEn ? "From Artists You Follow" : "Từ nghệ sĩ bạn theo dõi"
-                    let subtitle = isEn ? "Top tracks from \(randomArtist.username)" : "Các bài hát nổi bật của \(randomArtist.username)"
-                    return (title, subtitle, artistTracks)
-                }
+        let sortedArtists = artistFrequency.values
+            .sorted { $0.count > $1.count }
+            .map(\.user)
+
+        // Randomly pick from top 4 frequent artists for dynamic discovery across sessions
+        guard let chosenArtist = sortedArtists.prefix(4).randomElement() else {
+            return ("", nil, [])
+        }
+
+        do {
+            let tracks = try await api.getUserTracks(userID: chosenArtist.id, limit: 12)
+            let dedup = deduplicateTracks(tracks)
+            let title = isEn ? "More from \(chosenArtist.username)" : "Thêm từ \(chosenArtist.username)"
+            let subtitle = isEn ? "Because you listen to this artist" : "Vì bạn thường nghe nghệ sĩ này"
+            return (title, subtitle, dedup)
+        } catch {
+            return ("", nil, [])
+        }
+    }
+
+    // MARK: - Tier 3: Anti-Repetition Global Trending & Rotating Genres
+
+    private func fetchTrendingCharts(api: SoundCloudAPI) async -> [Track] {
+        let offsets = [0, 10, 20]
+        let offset = offsets.randomElement() ?? 0
+        do {
+            let tracks = try await api.getCharts(
+                genre: "soundcloud:genres:all-music",
+                kind: "trending",
+                limit: 30,
+                offset: offset
+            )
+            let dedup = deduplicateTracks(tracks).shuffled()
+            if !dedup.isEmpty {
+                return dedup
             }
+        } catch {
+            // Fallback to rotating search queries below
         }
 
-        // Priority 2: In-app liked songs
-        if let seed = library.likedTracks.randomElement() {
-            do {
-                let related = try await api.getRelatedTracks(trackID: seed.id, limit: 12)
-                if !related.isEmpty {
-                    let title = isEn ? "Made for You" : "Dành riêng cho bạn"
-                    let subtitle = isEn ? "Inspired by '\(seed.title)'" : "Lấy cảm hứng từ bài '\(seed.title)'"
-                    return (title, subtitle, related)
-                }
-            } catch {}
-        }
-
-        // Priority 3: Recently played songs in history
-        if let seed = library.recentlyPlayed.first {
-            do {
-                let related = try await api.getRelatedTracks(trackID: seed.id, limit: 12)
-                if !related.isEmpty {
-                    let title = isEn ? "Keep Listening" : "Tiếp tục nghe theo gu của bạn"
-                    let subtitle = isEn ? "Suggestions from '\(seed.title)'" : "Gợi ý từ bài '\(seed.title)'"
-                    return (title, subtitle, related)
-                }
-            } catch {}
-        }
-
-        let dynamicQueries: [(String, String)] = isEn ? [
-            ("Today's Top Hits", "Trending music around the globe"),
-            ("Acoustic Chill", "Laid-back acoustic melodies"),
-            ("Electronic & Dance", "High-energy beats and rhythm"),
-            ("Lo-Fi Study Beats", "Smooth beats to focus and relax"),
-            ("Indie Discoveries", "Fresh independent sounds")
-        ] : [
-            ("V-Pop Hot Hits", "Tuyển tập nhạc Việt thịnh hành"),
-            ("Acoustic Chill", "Giai điệu mộc mạc thư giãn"),
-            ("Deep Electronic & EDM", "Sôi động với năng lượng cao"),
-            ("Lo-Fi Study Beats", "Tập trung và làm việc hiệu quả"),
-            ("Indie Vibes", "Những thanh âm indie độc đáo")
+        let fallbackQueries = [
+            "Global Top Hits",
+            "Trending Worldwide",
+            "Top 50 Hits",
+            "Today Top Hits"
         ]
-        let defaultChoice = isEn ? ("Discover Weekly", "Curated weekly picks") : ("Khám phá hàng tuần", "Tuyển tập được chọn lọc")
-        let chosen = dynamicQueries.randomElement() ?? defaultChoice
-        let randomOffset = force ? Int.random(in: 0...4) : 0
-        let tracks = await safeSearch(api: api, query: chosen.0, limit: 12, offset: randomOffset)
-        return (chosen.0, chosen.1, tracks)
+        let chosenQuery = fallbackQueries.randomElement() ?? "Global Top Hits"
+        let fetched = await safeSearch(api: api, query: chosenQuery, limit: 15, offset: offset)
+        return deduplicateTracks(fetched).shuffled()
+    }
+
+    private func fetchGenreSection(
+        api: SoundCloudAPI,
+        genre: GenreCategory
+    ) async -> (title: String, tracks: [Track]) {
+        let isEn = AppSettings.shared.language == .english
+        let title = isEn ? genre.nameEN : genre.nameVI
+        let offset = [0, 10, 20].randomElement() ?? 0
+        let tracks = await safeSearch(api: api, query: genre.query, limit: 15, offset: offset)
+        return (title, deduplicateTracks(tracks).shuffled())
     }
 
     private func safeSearch(api: SoundCloudAPI, query: String, limit: Int, offset: Int = 0) async -> [Track] {

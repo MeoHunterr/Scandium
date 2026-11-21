@@ -66,6 +66,39 @@ final class SoundCloudAPI: ObservableObject {
         )
     }
 
+    // MARK: - Search Users / Artists
+
+    /// Searches SoundCloud for users / artists matching the given query.
+    func searchUsers(query: String, limit: Int = defaultLimit) async throws -> [SoundCloudUser] {
+        let clientID = try await scraper.getClientID()
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=")
+        let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: allowed) ?? query
+
+        let urlString = "\(Self.baseURL)/search/users?q=\(encodedQuery)&client_id=\(clientID)&limit=\(limit)&linked_partitioning=1"
+
+        struct UserSearchResponse: Codable {
+            let collection: [SoundCloudUser]
+            let totalResults: Int?
+            let nextHref: String?
+
+            enum CodingKeys: String, CodingKey {
+                case collection
+                case totalResults = "total_results"
+                case nextHref = "next_href"
+            }
+        }
+
+        let data = try await performRawRequest(urlString: urlString)
+        if let resp = try? JSONDecoder().decode(UserSearchResponse.self, from: data) {
+            return resp.collection
+        }
+        if let arr = try? JSONDecoder().decode([SoundCloudUser].self, from: data) {
+            return arr
+        }
+        return []
+    }
+
     // MARK: - Resolve Track by ID
 
     /// Fetches a single track by its numeric ID.
@@ -497,6 +530,21 @@ final class SoundCloudAPI: ObservableObject {
         return []
     }
 
+    /// Fetches tracks published by a specific user / artist.
+    func getUserTracks(userID: Int, limit: Int = 30) async throws -> [Track] {
+        let clientID = try await scraper.getClientID()
+        let urlString = "\(Self.baseURL)/users/\(userID)/tracks?client_id=\(clientID)&limit=\(limit)&linked_partitioning=1"
+
+        let data = try await performRawRequest(urlString: urlString)
+        if let resp = try? JSONDecoder().decode(SearchResponse.self, from: data) {
+            return resp.collection
+        }
+        if let arr = try? JSONDecoder().decode([Track].self, from: data) {
+            return arr
+        }
+        return []
+    }
+
     /// Fetches related / recommended tracks for a given track ID
     func getRelatedTracks(trackID: Int, limit: Int = 15) async throws -> [Track] {
         let clientID = try await scraper.getClientID()
@@ -518,26 +566,115 @@ final class SoundCloudAPI: ObservableObject {
         return []
     }
 
-    /// Fetches the authenticated user's stream / feed
-    func getUserStream(oauthToken: String, limit: Int = 20) async throws -> [Track] {
+    /// Fetches the authenticated user's stream / following feed (new tracks & reposts from followed artists)
+    func getFollowingStream(oauthToken: String, limit: Int = 30) async throws -> [Track] {
         let clientID = try await scraper.getClientID()
         let urlString = "\(Self.baseURL)/stream?client_id=\(clientID)&limit=\(limit)"
         let headers = ["Authorization": "OAuth \(oauthToken)"]
 
         let data = try await performRawRequest(urlString: urlString, headers: headers)
+
+        struct StreamItem: Decodable {
+            let track: Track?
+
+            enum CodingKeys: String, CodingKey {
+                case track
+            }
+
+            init(from decoder: Decoder) throws {
+                if let container = try? decoder.container(keyedBy: CodingKeys.self),
+                   let t = try? container.decodeIfPresent(Track.self, forKey: .track) {
+                    self.track = t
+                    return
+                }
+                if let t = try? Track(from: decoder) {
+                    self.track = t
+                    return
+                }
+                self.track = nil
+            }
+        }
+
+        struct StreamResponse: Decodable {
+            let collection: [StreamItem]
+        }
+
+        if let streamRes = try? JSONDecoder().decode(StreamResponse.self, from: data) {
+            let tracks = streamRes.collection.compactMap { $0.track }
+            if !tracks.isEmpty {
+                return tracks
+            }
+        }
+
+        if let direct = try? JSONDecoder().decode(SearchResponse.self, from: data) {
+            return direct.collection
+        }
+        if let arr = try? JSONDecoder().decode([Track].self, from: data) {
+            return arr
+        }
+        return []
+    }
+
+    /// Fetches the authenticated user's stream / feed (backward compatibility alias)
+    func getUserStream(oauthToken: String, limit: Int = 20) async throws -> [Track] {
+        try await getFollowingStream(oauthToken: oauthToken, limit: limit)
+    }
+
+    /// Fetches trending charts from SoundCloud API v2
+    func getCharts(
+        genre: String = "soundcloud:genres:all-music",
+        kind: String = "trending",
+        limit: Int = 30,
+        offset: Int = 0
+    ) async throws -> [Track] {
+        let clientID = try await scraper.getClientID()
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=")
+        let encodedGenre = genre.addingPercentEncoding(withAllowedCharacters: allowed) ?? genre
+        let urlString = "\(Self.baseURL)/charts?kind=\(kind)&genre=\(encodedGenre)&client_id=\(clientID)&limit=\(limit)&offset=\(offset)&linked_partitioning=1"
+
+        let data = try await performRawRequest(urlString: urlString)
+
+        struct ChartItem: Decodable {
+            let track: Track?
+
+            enum CodingKeys: String, CodingKey {
+                case track
+            }
+
+            init(from decoder: Decoder) throws {
+                if let container = try? decoder.container(keyedBy: CodingKeys.self),
+                   let t = try? container.decodeIfPresent(Track.self, forKey: .track) {
+                    self.track = t
+                    return
+                }
+                if let t = try? Track(from: decoder) {
+                    self.track = t
+                    return
+                }
+                self.track = nil
+            }
+        }
+
+        struct ChartResponse: Decodable {
+            let collection: [ChartItem]
+        }
+
+        if let chartRes = try? JSONDecoder().decode(ChartResponse.self, from: data) {
+            let tracks = chartRes.collection.compactMap { $0.track }
+            if !tracks.isEmpty {
+                return tracks
+            }
+        }
+
         if let direct = try? JSONDecoder().decode(SearchResponse.self, from: data) {
             return direct.collection
         }
 
-        struct StreamItem: Codable {
-            let track: Track?
+        if let arr = try? JSONDecoder().decode([Track].self, from: data) {
+            return arr
         }
-        struct StreamResponse: Codable {
-            let collection: [StreamItem]
-        }
-        if let streamRes = try? JSONDecoder().decode(StreamResponse.self, from: data) {
-            return streamRes.collection.compactMap { $0.track }
-        }
+
         return []
     }
 
@@ -606,7 +743,8 @@ final class SoundCloudAPI: ObservableObject {
     }
 
     /// Resolves the direct stream URL for a track.
-    /// Prioritizes progressive (direct MP3) over HLS for lower CPU overhead on legacy devices.
+    /// Strictly filters out unsupported codecs (ogg/opus) on iOS 15.
+    /// Prioritizes Progressive audio/mpeg -> HLS audio/mpeg -> HLS audio/mp4 (AAC).
     func resolveStreamURL(for track: Track) async throws -> URL {
         var currentTrack = track
         if currentTrack.media?.transcodings.isEmpty ?? true {
@@ -619,7 +757,20 @@ final class SoundCloudAPI: ObservableObject {
             throw APIError.noTranscodings
         }
 
-        let sorted = prioritizeTranscodings(transcodings)
+        // Strictly eliminate all ogg and opus transcodings as iOS 15 AVPlayer cannot decode them
+        let compatibleTranscodings = transcodings.filter { transcoding in
+            let mime = transcoding.format.mimeType.lowercased()
+            if mime.contains("ogg") || mime.contains("opus") {
+                return false
+            }
+            return mime.contains("mpeg") || mime.contains("mp4") || mime.contains("aac")
+        }
+
+        guard !compatibleTranscodings.isEmpty else {
+            throw APIError.unsupportedAudioCodec
+        }
+
+        let sorted = prioritizeTranscodings(compatibleTranscodings)
 
         var lastError: Error = APIError.noStreamURL
 
@@ -636,8 +787,8 @@ final class SoundCloudAPI: ObservableObject {
         throw lastError
     }
 
-    /// Sorts transcodings to prefer progressive MP3, then HLS, then others.
-    /// Within the same protocol, prefers audio/mpeg over opus.
+    /// Sorts transcodings by strict priority:
+    /// Progressive audio/mpeg -> HLS audio/mpeg -> HLS audio/mp4 (AAC).
     private func prioritizeTranscodings(_ transcodings: [Transcoding]) -> [Transcoding] {
         transcodings.sorted { a, b in
             let scoreA = transcodingPriority(a)
@@ -648,17 +799,22 @@ final class SoundCloudAPI: ObservableObject {
 
     private func transcodingPriority(_ transcoding: Transcoding) -> Int {
         var score = 0
+        let mime = transcoding.format.mimeType.lowercased()
 
-        if transcoding.isProgressive {
-            score += 100
-        } else if transcoding.isHLS {
-            score += 50
+        // Strict priority: Progressive audio/mpeg -> HLS audio/mpeg -> HLS audio/mp4 (AAC)
+        if transcoding.isProgressive && mime.contains("mpeg") {
+            score = 300
+        } else if transcoding.isHLS && mime.contains("mpeg") {
+            score = 200
+        } else if (transcoding.isHLS || transcoding.isProgressive) && (mime.contains("mp4") || mime.contains("aac")) {
+            score = 100
+        } else {
+            score = 10
         }
 
-        if transcoding.format.mimeType.contains("mpeg") {
-            score += 20
-        } else if transcoding.format.mimeType.contains("ogg") || transcoding.format.mimeType.contains("opus") {
-            score += 10
+        // Prefer non-snipped full stream over snipped preview
+        if transcoding.snipped != true {
+            score += 50
         }
 
         if transcoding.quality == "hq" {
@@ -750,6 +906,7 @@ enum APIError: LocalizedError {
     case httpError(statusCode: Int)
     case decodingFailed(underlying: Error)
     case noTranscodings
+    case unsupportedAudioCodec
     case noStreamURL
     case invalidStreamURL(String)
     case noWaveformURL
@@ -766,6 +923,8 @@ enum APIError: LocalizedError {
             return "Failed to decode response: \(err.localizedDescription)"
         case .noTranscodings:
             return "This track has no available stream transcodings."
+        case .unsupportedAudioCodec:
+            return "This track contains no supported MP3 or AAC streams for iOS 15."
         case .noStreamURL:
             return "Could not resolve a stream URL for this track."
         case .invalidStreamURL(let url):

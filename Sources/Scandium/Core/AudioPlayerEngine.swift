@@ -186,7 +186,7 @@ final class AudioPlayerEngine: ObservableObject {
                 if Task.isCancelled { return }
                 await MainActor.run {
                     guard !Task.isCancelled else { return }
-                    self.playbackState = .failed(error.localizedDescription)
+                    self.handleStreamError(error.localizedDescription)
                 }
             }
         }
@@ -241,9 +241,20 @@ final class AudioPlayerEngine: ObservableObject {
                     if itemDuration.isFinite && itemDuration > 0 {
                         self.duration = itemDuration
                     }
+                    if let err = item.error {
+                        self.handleStreamError(err.localizedDescription)
+                        return
+                    }
+                    if !item.tracks.isEmpty {
+                        let hasAudio = item.tracks.contains { $0.assetTrack?.mediaType == .audio }
+                        if !hasAudio {
+                            self.handleStreamError("No playable audio track found in stream.")
+                            return
+                        }
+                    }
                 case .failed:
-                    let errorMsg = item.error?.localizedDescription ?? "Playback failed"
-                    self.playbackState = .failed(errorMsg)
+                    let errorMsg = item.error?.localizedDescription ?? "Playback stream failed."
+                    self.handleStreamError(errorMsg)
                 default:
                     break
                 }
@@ -513,6 +524,20 @@ final class AudioPlayerEngine: ObservableObject {
 
     // MARK: - Playback Finished & Failed Handlers
 
+    private func handleStreamError(_ message: String) {
+        player.pause()
+        playbackState = .failed(message)
+        updateNowPlayingElapsedTime()
+
+        // Auto-skip on stream error if configured and queue has more songs
+        if AppSettings.shared.autoSkipOnError && !queue.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                guard let self = self, case .failed = self.playbackState else { return }
+                self.nextTrack()
+            }
+        }
+    }
+
     private func handlePlaybackFinished() {
         // Sleep Timer: Stop at end of current track
         if AppSettings.shared.sleepTimerOption == .endOfTrack {
@@ -548,15 +573,7 @@ final class AudioPlayerEngine: ObservableObject {
                 }
             }
         }
-        self.playbackState = .failed(message)
-
-        // Auto-skip on stream error if configured and queue has more songs
-        if AppSettings.shared.autoSkipOnError && !queue.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                guard let self = self, case .failed = self.playbackState else { return }
-                self.nextTrack()
-            }
-        }
+        handleStreamError(message)
     }
 
     // MARK: - Audio Interruption & Route Change (Headphone Unplug)

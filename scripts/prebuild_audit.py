@@ -186,20 +186,22 @@ def check_env_objects(swift_files):
     # For each view that declares @EnvironmentObject<X>, check X is also declared
     # at the points where that view is instantiated in sheets/fullScreenCover
     print("  Checking all sheets/fullScreenCover pass required env objects:")
-    sheet_files = ["MainContainerView.swift", "FullPlayerView.swift"]
+    sheet_files = ["MainContainerView.swift", "FullPlayerView.swift", "SearchView.swift", "LibraryView.swift"]
+    sheet_pattern = r"(?:\.sheet|fullScreenCover)\s*\([^)]*(?:\{[^}]*\}[^)]*)*\)\s*\{[^}]*?(\w+View)\s*\("
     for filename in sheet_files:
         content = all_content.get(filename, "")
-        # Find all .sheet { ViewName().environmentObject(...) } blocks
-        # Simple heuristic: look for view types instantiated inside sheet blocks
-        sheet_views = re.findall(r'\.sheet[^{]*\{[^}]*?(\w+View)\(\)', content, re.DOTALL)
-        sheet_views += re.findall(r'fullScreenCover[^{]*\{[^}]*?(\w+View)\(\)', content, re.DOTALL)
+        sheet_views = re.findall(sheet_pattern, content, re.DOTALL)
         for view_name in set(sheet_views):
             view_file = f"{view_name}.swift"
             required = view_env_objects.get(view_file, set())
             for cls in required:
                 # Check if .environmentObject(...) is present near that view in the sheet
-                pattern = rf'{view_name}\(\)[^}}]*.environmentObject\([^)]*\)'
+                pattern = rf'{view_name}\s*\([^}}]*\.environmentObject\([^)]*{cls.lower()}[^)]*\)'
                 found = bool(re.search(pattern, content, re.DOTALL))
+                if not found:
+                    found = bool(re.search(rf'{view_name}\s*\([^}}]*\.environmentObject\([^)]*{cls}[^)]*\)', content, re.DOTALL))
+                if not found:
+                    found = bool(re.search(rf'{view_name}\s*\([^}}]*\.environmentObject\(', content, re.DOTALL))
                 report(found or cls not in REQUIRED_ENV_OBJECTS,
                        f"{filename}: {view_name} sheet passes {cls}",
                        f"May be missing .environmentObject({cls.lower()}) in sheet" if not found else "")

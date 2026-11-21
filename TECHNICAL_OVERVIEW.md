@@ -1,7 +1,7 @@
 # BÁO CÁO TỔNG QUAN KỸ THUẬT DỰ ÁN SCANDIUM (21 Sc)
 **Tài liệu Kiến trúc Kỹ thuật, Cơ chế Tương thích Ngược & Quy trình Biên dịch**  
 **Tác giả:** MeoHunter  
-**Phiên bản hiện tại:** 1.4.1 | **Giấy phép:** GNU General Public License v3.0 (GPL-3.0)  
+**Phiên bản hiện tại:** 1.4.2 | **Giấy phép:** GNU General Public License v3.0 (GPL-3.0)  
 **Mục tiêu nền tảng:** iOS 15.0+ (iOS 15.0 – iOS 18.x) | **Môi trường build:** Linux Cross-Compilation via `xtool`
 
 ---

@@ -7,12 +7,15 @@ struct FullPlayerView: View {
     @EnvironmentObject var player: AudioPlayerEngine
     @EnvironmentObject var api: SoundCloudAPI
     @EnvironmentObject var library: LibraryManager
+    @EnvironmentObject var scraper: ClientIDScraper
     @Environment(\.presentationMode) var presentationMode
     @ObservedObject private var settings = AppSettings.shared
 
     @State private var waveformSamples: [Float] = []
     @State private var dragProgress: Double? = nil
     @State private var showQueueSheet: Bool = false
+    @State private var selectedArtist: SoundCloudUser? = nil
+    @State private var showArtistDetail: Bool = false
     @State private var dragOffsetY: CGFloat = 0
 
     private let playbackRates: [Float] = [0.8, 1.0, 1.25, 1.5, 2.0]
@@ -105,6 +108,18 @@ struct FullPlayerView: View {
                 .environmentObject(player)
                 .environmentObject(library)
         }
+        .background(
+            Color.clear
+                .sheet(isPresented: $showArtistDetail, onDismiss: { selectedArtist = nil }) {
+                    if let artist = selectedArtist {
+                        ArtistDetailSheetView(artist: artist)
+                            .environmentObject(api)
+                            .environmentObject(player)
+                            .environmentObject(library)
+                            .environmentObject(scraper)
+                    }
+                }
+        )
     }
 
     // MARK: - 1. Header Section
@@ -134,9 +149,12 @@ struct FullPlayerView: View {
 
                 Spacer()
 
-                // Mirror spacer for perfect center
-                Color.clear
-                    .frame(width: 36, height: 36)
+                if let track = player.currentTrack {
+                    trackOptionsMenu(track: track)
+                } else {
+                    Color.clear
+                        .frame(width: 36, height: 36)
+                }
             }
             .padding(.horizontal, 16)
         }
@@ -165,28 +183,97 @@ struct FullPlayerView: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text(player.currentTrack?.user?.username ?? "SoundCloud")
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundColor(ScandiumTheme.subtext)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let user = player.currentTrack?.user {
+                    Button(action: {
+                        selectedArtist = user
+                        showArtistDetail = true
+                    }) {
+                        HStack(spacing: 4) {
+                            Text(user.username)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(ScandiumTheme.subtext)
+                                .lineLimit(1)
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(ScandiumTheme.subtext.opacity(0.7))
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                } else {
+                    Text(player.currentTrack?.user?.username ?? "SoundCloud")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundColor(ScandiumTheme.subtext)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if let track = player.currentTrack {
-                let isLiked = library.isLiked(track: track)
-                Button(action: {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                        library.toggleLike(track: track)
+                HStack(spacing: 6) {
+                    let isLiked = library.isLiked(track: track)
+                    Button(action: {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                            library.toggleLike(track: track)
+                        }
+                    }) {
+                        Image(systemName: isLiked ? "heart.fill" : "heart")
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundColor(isLiked ? ScandiumTheme.spotifyGreen : Color.white.opacity(0.7))
+                            .frame(width: 36, height: 36)
                     }
-                }) {
-                    Image(systemName: isLiked ? "heart.fill" : "heart")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundColor(isLiked ? ScandiumTheme.spotifyGreen : Color.white.opacity(0.7))
-                        .frame(width: 40, height: 40)
+                    .buttonStyle(PlainButtonStyle())
+
+                    trackOptionsMenu(track: track)
                 }
-                .buttonStyle(PlainButtonStyle())
             }
+        }
+    }
+
+    private func trackOptionsMenu(track: Track) -> some View {
+        Menu {
+            if let user = track.user {
+                Button(action: {
+                    selectedArtist = user
+                    showArtistDetail = true
+                }) {
+                    Label(settings.loc("Xem nghệ sĩ", "Go to Artist"), systemImage: "person.circle")
+                }
+            }
+
+            Button(action: {
+                player.playNext(track)
+            }) {
+                Label(settings.loc("Phát tiếp theo", "Play Next"), systemImage: "text.insert")
+            }
+
+            Button(action: {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                    library.toggleLike(track: track)
+                }
+            }) {
+                let isLiked = library.isLiked(track: track)
+                Label(
+                    isLiked ? settings.loc("Bỏ thích", "Unlike") : settings.loc("Thích", "Like"),
+                    systemImage: isLiked ? "heart.slash" : "heart"
+                )
+            }
+
+            if let link = track.permalinkURL ?? track.uri {
+                Button(action: {
+                    UIPasteboard.general.string = link
+                }) {
+                    Label(settings.loc("Sao chép liên kết", "Copy Link"), systemImage: "link")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundColor(Color.white.opacity(0.8))
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
         }
     }
 

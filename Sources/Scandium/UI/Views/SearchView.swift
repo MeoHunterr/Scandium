@@ -3,13 +3,30 @@
 
 import SwiftUI
 
+enum SearchScope: Int, CaseIterable {
+    case tracks = 0
+    case artists = 1
+
+    func title(settings: AppSettings) -> String {
+        switch self {
+        case .tracks: return settings.loc("Bài hát", "Tracks")
+        case .artists: return settings.loc("Nghệ sĩ", "Artists")
+        }
+    }
+}
+
 struct SearchView: View {
     @EnvironmentObject var api: SoundCloudAPI
     @EnvironmentObject var player: AudioPlayerEngine
     @EnvironmentObject var library: LibraryManager
+    @EnvironmentObject var scraper: ClientIDScraper
 
     @State private var searchText: String = ""
+    @State private var selectedScope: SearchScope = .tracks
     @State private var tracks: [Track] = []
+    @State private var artists: [SoundCloudUser] = []
+    @State private var selectedArtist: SoundCloudUser?
+    @State private var showArtistDetail: Bool = false
     @State private var isLoading: Bool = false
     @State private var errorMessage: String?
     @State private var nextHref: String?
@@ -29,217 +46,110 @@ struct SearchView: View {
     }
 
     private var quickTags: [String] {
-        if settings.language == .english {
-            return [
-                settings.loc("Tất cả", "All"),
-                "Top Hits",
-                "Pop",
-                "Hip-Hop",
-                "EDM & Dance",
-                "Chill & Lo-Fi",
-                "R&B",
-                "Rock",
-                "Acoustic",
-                "Podcasts"
-            ]
-        } else {
-            return [
-                settings.loc("Tất cả", "All"),
-                "Thịnh hành",
-                "V-Pop",
-                "Rap Việt",
-                "Chill & Lo-Fi",
-                "EDM Remix",
-                "R&B",
-                "Acoustic",
-                "Nhạc Trẻ",
-                "Podcast"
-            ]
-        }
+        [
+            settings.loc("Tất cả", "All"),
+            "Top Hits",
+            "Pop",
+            "Hip-Hop",
+            "EDM & Dance",
+            "Chill & Lo-Fi",
+            "R&B",
+            "Rock",
+            "Acoustic",
+            "Podcasts"
+        ]
     }
 
     private var trendingKeywords: [String] {
-        if settings.language == .english {
-            return [
-                "Global Top 50",
-                "Viral Hits",
-                "The Weeknd",
-                "Taylor Swift",
-                "Synthwave",
-                "Lo-Fi Beats",
-                "Dua Lipa",
-                "Billie Eilish",
-                "Drake",
-                "EDM Festival",
-                "Workout Energy",
-                "Acoustic Sunset"
-            ]
-        } else {
-            return [
-                "V-Pop Hot Hits",
-                "Sơn Tùng M-TP",
-                "Rap Việt",
-                "Nhạc Trẻ Remix",
-                "Chill Buổi Tối",
-                "Vũ",
-                "Đen Vâu",
-                "Acoustic Buồn",
-                "Lo-Fi Việt Nam",
-                "Top TikTok Vietnam",
-                "Cà Phê Sáng",
-                "Indie Việt"
-            ]
-        }
+        [
+            "Global Top 50",
+            "Viral Hits",
+            "The Weeknd",
+            "Taylor Swift",
+            "Synthwave",
+            "Lo-Fi Beats",
+            "Dua Lipa",
+            "Billie Eilish",
+            "Drake",
+            "EDM Festival",
+            "Workout Energy",
+            "Acoustic Sunset"
+        ]
     }
 
     private var browseCategories: [SearchCategory] {
-        if settings.language == .english {
-            return [
-                SearchCategory(
-                    id: "pop",
-                    title: "Pop & Top Hits",
-                    query: "Today Top Hits Pop",
-                    icon: "music.mic",
-                    colors: [Color(red: 0.90, green: 0.20, blue: 0.55), Color(red: 0.60, green: 0.10, blue: 0.75)]
-                ),
-                SearchCategory(
-                    id: "hiphop",
-                    title: "Hip-Hop & Rap",
-                    query: "Hip Hop Rap Hits",
-                    icon: "flame.fill",
-                    colors: [Color(red: 0.95, green: 0.40, blue: 0.10), Color(red: 0.85, green: 0.15, blue: 0.20)]
-                ),
-                SearchCategory(
-                    id: "electronic",
-                    title: "Dance & EDM",
-                    query: "EDM Festival Dance",
-                    icon: "bolt.horizontal.fill",
-                    colors: [Color(red: 0.05, green: 0.70, blue: 0.90), Color(red: 0.15, green: 0.30, blue: 0.85)]
-                ),
-                SearchCategory(
-                    id: "chill",
-                    title: "Chill & Lo-Fi",
-                    query: "Lo-Fi Beats Study Chill",
-                    icon: "cup.and.saucer.fill",
-                    colors: [Color(red: 0.10, green: 0.65, blue: 0.55), Color(red: 0.20, green: 0.80, blue: 0.45)]
-                ),
-                SearchCategory(
-                    id: "rock",
-                    title: "Rock & Alternative",
-                    query: "Rock Alternative Classic",
-                    icon: "guitars.fill",
-                    colors: [Color(red: 0.75, green: 0.15, blue: 0.20), Color(red: 0.30, green: 0.10, blue: 0.20)]
-                ),
-                SearchCategory(
-                    id: "rnb",
-                    title: "R&B & Soul",
-                    query: "R&B Soul Chill",
-                    icon: "heart.fill",
-                    colors: [Color(red: 0.50, green: 0.15, blue: 0.80), Color(red: 0.70, green: 0.20, blue: 0.65)]
-                ),
-                SearchCategory(
-                    id: "workout",
-                    title: "Workout & Energy",
-                    query: "Workout Gym Motivation Energy",
-                    icon: "figure.run",
-                    colors: [Color(red: 0.95, green: 0.50, blue: 0.10), Color(red: 0.90, green: 0.25, blue: 0.10)]
-                ),
-                SearchCategory(
-                    id: "focus",
-                    title: "Focus & Ambient",
-                    query: "Deep Focus Ambient Piano",
-                    icon: "brain.head.profile",
-                    colors: [Color(red: 0.25, green: 0.40, blue: 0.80), Color(red: 0.20, green: 0.20, blue: 0.45)]
-                ),
-                SearchCategory(
-                    id: "indie",
-                    title: "Indie Discoveries",
-                    query: "Indie Pop Folk Discover",
-                    icon: "sparkles",
-                    colors: [Color(red: 0.65, green: 0.20, blue: 0.70), Color(red: 0.85, green: 0.20, blue: 0.50)]
-                ),
-                SearchCategory(
-                    id: "acoustic",
-                    title: "Acoustic & Melodic",
-                    query: "Acoustic Guitar Melodic",
-                    icon: "waveform",
-                    colors: [Color(red: 0.20, green: 0.60, blue: 0.35), Color(red: 0.10, green: 0.40, blue: 0.25)]
-                )
-            ]
-        } else {
-            return [
-                SearchCategory(
-                    id: "vpop",
-                    title: "V-Pop Nổi Bật",
-                    query: "V-Pop Hot Hits",
-                    icon: "music.mic",
-                    colors: [Color(red: 0.90, green: 0.20, blue: 0.55), Color(red: 0.60, green: 0.10, blue: 0.75)]
-                ),
-                SearchCategory(
-                    id: "rapviet",
-                    title: "Rap Việt Nam",
-                    query: "Rap Việt",
-                    icon: "flame.fill",
-                    colors: [Color(red: 0.95, green: 0.40, blue: 0.10), Color(red: 0.85, green: 0.15, blue: 0.20)]
-                ),
-                SearchCategory(
-                    id: "vinahouse",
-                    title: "EDM & Remix",
-                    query: "Nhạc Trẻ Remix EDM",
-                    icon: "bolt.horizontal.fill",
-                    colors: [Color(red: 0.05, green: 0.70, blue: 0.90), Color(red: 0.15, green: 0.30, blue: 0.85)]
-                ),
-                SearchCategory(
-                    id: "chillvn",
-                    title: "Chill & Lo-Fi",
-                    query: "Lo-Fi Việt Nam Chill",
-                    icon: "cup.and.saucer.fill",
-                    colors: [Color(red: 0.10, green: 0.65, blue: 0.55), Color(red: 0.20, green: 0.80, blue: 0.45)]
-                ),
-                SearchCategory(
-                    id: "ballad",
-                    title: "Ballad Tình Cảm",
-                    query: "Nhạc Trẻ Ballad Buồn",
-                    icon: "heart.fill",
-                    colors: [Color(red: 0.50, green: 0.15, blue: 0.80), Color(red: 0.70, green: 0.20, blue: 0.65)]
-                ),
-                SearchCategory(
-                    id: "acousticvn",
-                    title: "Acoustic Mộc Mạc",
-                    query: "Acoustic Guitar Việt",
-                    icon: "waveform",
-                    colors: [Color(red: 0.20, green: 0.60, blue: 0.35), Color(red: 0.10, green: 0.40, blue: 0.25)]
-                ),
-                SearchCategory(
-                    id: "indievn",
-                    title: "Indie Việt",
-                    query: "Indie Việt Nam",
-                    icon: "sparkles",
-                    colors: [Color(red: 0.65, green: 0.20, blue: 0.70), Color(red: 0.85, green: 0.20, blue: 0.50)]
-                ),
-                SearchCategory(
-                    id: "taptrung",
-                    title: "Tập Trung & Thư Giãn",
-                    query: "Nhạc Tập Trung Làm Việc Học Bài",
-                    icon: "brain.head.profile",
-                    colors: [Color(red: 0.25, green: 0.40, blue: 0.80), Color(red: 0.20, green: 0.20, blue: 0.45)]
-                ),
-                SearchCategory(
-                    id: "caphe",
-                    title: "Quán Cà Phê",
-                    query: "Cà Phê Sáng Chill Acoustic",
-                    icon: "cup.and.saucer",
-                    colors: [Color(red: 0.80, green: 0.45, blue: 0.25), Color(red: 0.55, green: 0.25, blue: 0.15)]
-                ),
-                SearchCategory(
-                    id: "gymvn",
-                    title: "Gym & Năng Lượng",
-                    query: "Workout Bass Boosted Remix",
-                    icon: "figure.run",
-                    colors: [Color(red: 0.95, green: 0.50, blue: 0.10), Color(red: 0.90, green: 0.25, blue: 0.10)]
-                )
-            ]
-        }
+        [
+            SearchCategory(
+                id: "pop",
+                title: settings.loc("Pop & Thịnh hành", "Pop & Top Hits"),
+                query: "Today Top Hits Pop",
+                icon: "music.mic",
+                colors: [Color(red: 0.90, green: 0.20, blue: 0.55), Color(red: 0.60, green: 0.10, blue: 0.75)]
+            ),
+            SearchCategory(
+                id: "hiphop",
+                title: settings.loc("Hip-Hop & Rap", "Hip-Hop & Rap"),
+                query: "Hip Hop Rap Hits",
+                icon: "flame.fill",
+                colors: [Color(red: 0.95, green: 0.40, blue: 0.10), Color(red: 0.85, green: 0.15, blue: 0.20)]
+            ),
+            SearchCategory(
+                id: "electronic",
+                title: settings.loc("Dance & EDM", "Dance & EDM"),
+                query: "EDM Festival Dance",
+                icon: "bolt.horizontal.fill",
+                colors: [Color(red: 0.05, green: 0.70, blue: 0.90), Color(red: 0.15, green: 0.30, blue: 0.85)]
+            ),
+            SearchCategory(
+                id: "chill",
+                title: settings.loc("Chill & Lo-Fi", "Chill & Lo-Fi"),
+                query: "Lo-Fi Beats Study Chill",
+                icon: "cup.and.saucer.fill",
+                colors: [Color(red: 0.10, green: 0.65, blue: 0.55), Color(red: 0.20, green: 0.80, blue: 0.45)]
+            ),
+            SearchCategory(
+                id: "rock",
+                title: settings.loc("Rock & Alternative", "Rock & Alternative"),
+                query: "Rock Alternative Classic",
+                icon: "guitars.fill",
+                colors: [Color(red: 0.75, green: 0.15, blue: 0.20), Color(red: 0.30, green: 0.10, blue: 0.20)]
+            ),
+            SearchCategory(
+                id: "rnb",
+                title: settings.loc("R&B & Soul", "R&B & Soul"),
+                query: "R&B Soul Chill",
+                icon: "heart.fill",
+                colors: [Color(red: 0.50, green: 0.15, blue: 0.80), Color(red: 0.70, green: 0.20, blue: 0.65)]
+            ),
+            SearchCategory(
+                id: "workout",
+                title: settings.loc("Tập luyện & Thể thao", "Workout & Energy"),
+                query: "Workout Gym Motivation Energy",
+                icon: "figure.run",
+                colors: [Color(red: 0.95, green: 0.50, blue: 0.10), Color(red: 0.90, green: 0.25, blue: 0.10)]
+            ),
+            SearchCategory(
+                id: "focus",
+                title: settings.loc("Tập trung & Thư giãn", "Focus & Ambient"),
+                query: "Deep Focus Ambient Piano",
+                icon: "brain.head.profile",
+                colors: [Color(red: 0.25, green: 0.40, blue: 0.80), Color(red: 0.20, green: 0.20, blue: 0.45)]
+            ),
+            SearchCategory(
+                id: "indie",
+                title: settings.loc("Indie Khám phá", "Indie Discoveries"),
+                query: "Indie Pop Folk Discover",
+                icon: "sparkles",
+                colors: [Color(red: 0.65, green: 0.20, blue: 0.70), Color(red: 0.85, green: 0.20, blue: 0.50)]
+            ),
+            SearchCategory(
+                id: "acoustic",
+                title: settings.loc("Acoustic Mộc mạc", "Acoustic & Melodic"),
+                query: "Acoustic Guitar Melodic",
+                icon: "waveform",
+                colors: [Color(red: 0.20, green: 0.60, blue: 0.35), Color(red: 0.10, green: 0.40, blue: 0.25)]
+            )
+        ]
     }
 
     private static let searchHistoryKey = "scandium_search_history_v1"
@@ -251,11 +161,23 @@ struct SearchView: View {
         VStack(spacing: 0) {
             headerView
             searchBarView
-            quickFilterTagsView
+            scopeSelectorView
+            if selectedScope == .tracks {
+                quickFilterTagsView
+            }
             contentView
         }
         .onAppear {
             loadSearchHistory()
+        }
+        .sheet(isPresented: $showArtistDetail, onDismiss: { selectedArtist = nil }) {
+            if let artist = selectedArtist {
+                ArtistDetailSheetView(artist: artist)
+                    .environmentObject(api)
+                    .environmentObject(player)
+                    .environmentObject(library)
+                    .environmentObject(scraper)
+            }
         }
     }
 
@@ -282,7 +204,7 @@ struct SearchView: View {
 
             ZStack(alignment: .leading) {
                 if searchText.isEmpty {
-                    Text(settings.loc("Tìm bài hát, nghệ sĩ...", "Search songs, artists..."))
+                    Text(selectedScope == .tracks ? settings.loc("Tìm bài hát, thể loại...", "Search songs, genres...") : settings.loc("Tìm tên nghệ sĩ...", "Search artist name..."))
                         .font(.system(size: 15))
                         .foregroundColor(ScandiumTheme.subtext.opacity(0.6))
                 }
@@ -301,6 +223,9 @@ struct SearchView: View {
                 Button(action: {
                     searchText = ""
                     tracks = []
+                    artists = []
+                    selectedArtist = nil
+                    showArtistDetail = false
                     hasSearched = false
                     errorMessage = nil
                 }) {
@@ -324,6 +249,38 @@ struct SearchView: View {
         .padding(.top, 10)
     }
 
+    // MARK: - Scope Selector (Tracks vs Artists)
+
+    private var scopeSelectorView: some View {
+        HStack(spacing: 8) {
+            ForEach(SearchScope.allCases, id: \.self) { scope in
+                Button(action: {
+                    if selectedScope != scope {
+                        selectedScope = scope
+                        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty {
+                            performSearch()
+                        }
+                    }
+                }) {
+                    Text(scope.title(settings: settings))
+                        .font(.system(size: 13, weight: selectedScope == scope ? .bold : .medium))
+                        .foregroundColor(selectedScope == scope ? (ScandiumTheme.isDark ? .black : .white) : ScandiumTheme.textPrimary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule()
+                                .fill(selectedScope == scope ? ScandiumTheme.textPrimary : ScandiumTheme.surfaceElevated)
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+
     // MARK: - Quick Filter Tags
 
     private var quickFilterTagsView: some View {
@@ -341,6 +298,7 @@ struct SearchView: View {
                         } else {
                             searchText = ""
                             tracks = []
+                            artists = []
                             hasSearched = false
                             errorMessage = nil
                         }
@@ -359,7 +317,7 @@ struct SearchView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
         }
     }
 
@@ -368,14 +326,22 @@ struct SearchView: View {
     private var contentView: some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: 4) {
-                if !hasSearched && tracks.isEmpty {
+                if !hasSearched && tracks.isEmpty && artists.isEmpty {
                     emptyStateView
                 } else if let error = errorMessage {
                     errorView(error)
-                } else if tracks.isEmpty && hasSearched && !isLoading {
-                    noResultsView
+                } else if selectedScope == .tracks {
+                    if tracks.isEmpty && hasSearched && !isLoading {
+                        noResultsView
+                    } else {
+                        trackListView
+                    }
                 } else {
-                    trackListView
+                    if artists.isEmpty && hasSearched && !isLoading {
+                        noResultsView
+                    } else {
+                        artistListView
+                    }
                 }
             }
             .padding(.bottom, 130)
@@ -391,6 +357,10 @@ struct SearchView: View {
                 track: track,
                 isCurrentlyPlaying: player.currentTrack?.id == track.id,
                 showLikeButton: true,
+                onSelectArtist: { artist in
+                    selectedArtist = artist
+                    showArtistDetail = true
+                },
                 onTap: {
                     player.playQueue(tracks, startingAt: index)
                 }
@@ -413,6 +383,71 @@ struct SearchView: View {
                     .padding(.vertical, 16)
                 Spacer()
             }
+        }
+    }
+
+    // MARK: - Artist List
+
+    @ViewBuilder
+    private var artistListView: some View {
+        ForEach(artists) { artist in
+            Button(action: {
+                selectedArtist = artist
+                showArtistDetail = true
+            }) {
+                HStack(spacing: 14) {
+                    CachedAsyncImage(
+                        url: artist.highResAvatarURL ?? (artist.avatarURL.flatMap { URL(string: $0) }),
+                        width: 52,
+                        height: 52,
+                        cornerRadius: 26
+                    )
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 5) {
+                            Text(artist.username)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(ScandiumTheme.textPrimary)
+                                .lineLimit(1)
+
+                            if artist.verified == true {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(ScandiumTheme.spotifyGreen)
+                            }
+                        }
+
+                        HStack(spacing: 8) {
+                            if let followers = artist.followersCount {
+                                Text("\(formatCount(followers)) \(settings.loc("người theo dõi", "followers"))")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(ScandiumTheme.subtext)
+                            }
+
+                            if let tracks = artist.trackCount {
+                                Text("•")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(ScandiumTheme.subtext.opacity(0.5))
+
+                                Text("\(formatCount(tracks)) \(settings.loc("bài hát", "tracks"))")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(ScandiumTheme.subtext)
+                            }
+                        }
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(ScandiumTheme.subtext.opacity(0.5))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.001))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
         }
     }
 
@@ -678,6 +713,24 @@ struct SearchView: View {
         errorMessage = nil
         hasSearched = true
 
+        if selectedScope == .artists {
+            Task {
+                do {
+                    let result = try await api.searchUsers(query: trimmed)
+                    await MainActor.run {
+                        self.artists = result
+                        self.isLoading = false
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.errorMessage = error.localizedDescription
+                        self.isLoading = false
+                    }
+                }
+            }
+            return
+        }
+
         Task {
             do {
                 let response = try await api.searchTracks(query: trimmed)
@@ -696,7 +749,7 @@ struct SearchView: View {
     }
 
     private func loadMoreResults() {
-        guard let href = nextHref, !isLoadingMore else { return }
+        guard selectedScope == .tracks, let href = nextHref, !isLoadingMore else { return }
         isLoadingMore = true
 
         Task {
@@ -725,6 +778,16 @@ struct SearchView: View {
             }
         }
         return result
+    }
+
+    private func formatCount(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            return String(format: "%.1fM", Double(count) / 1_000_000.0)
+        } else if count >= 1_000 {
+            return String(format: "%.1fK", Double(count) / 1_000.0)
+        } else {
+            return "\(count)"
+        }
     }
 
     private func loadSearchHistory() {
