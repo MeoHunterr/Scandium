@@ -1,7 +1,7 @@
 # BÁO CÁO TỔNG QUAN KỸ THUẬT DỰ ÁN SCANDIUM (21 Sc)
 **Tài liệu Kiến trúc Kỹ thuật, Cơ chế Tương thích Ngược & Quy trình Biên dịch**  
 **Tác giả:** MeoHunter  
-**Phiên bản hiện tại:** 1.4.2 | **Giấy phép:** GNU General Public License v3.0 (GPL-3.0)  
+**Phiên bản hiện tại:** 1.5.1 | **Giấy phép:** GNU General Public License v3.0 (GPL-3.0)  
 **Mục tiêu nền tảng:** iOS 15.0+ (iOS 15.0 – iOS 18.x) | **Môi trường build:** Linux Cross-Compilation via `xtool`
 
 ---
@@ -393,7 +393,7 @@ flowchart TD
     CopyAssets --> Patch["Chạy scripts/patch_macho_weak.py (Vá Mach-O Weak Links)"]
     Patch --> Sign["Ký giả lập Ad-hoc: ldid -Sentitlements.plist"]
     Sign --> Package["Đóng gói Payload thành Scandium.ipa (Zip -9)"]
-    Package --> Done["Xuất file hoàn tất: Scandium.ipa (v1.4.0)"]
+    Package --> Done["Xuất file hoàn tất: Scandium.ipa (v1.5.1)"]
 ```
 
 ### Script kiểm toán `scripts/prebuild_audit.py`:
@@ -458,13 +458,13 @@ Scandium/
 │   └── ScandiumTests/
 │       └── ScandiumTests.swift        # Bộ kiểm thử đơn vị: SQLite migration, LRU cache, regex, decoders
 ├── entitlements.plist                 # Quyền hạn TrollStore (no-sandbox = true, không platform-application)
-├── Info.plist                         # Cấu hình bundle (v1.4.0), UIBackgroundModes = [audio], Alternate Icons
+├── Info.plist                         # Cấu hình bundle (v1.5.1), UIBackgroundModes = [audio], Alternate Icons
 ├── instructions.md                    # Bản đặc tả kỹ thuật dự án ban đầu
 ├── LICENSE                            # Giấy phép mã nguồn mở GNU General Public License v3.0
 ├── Package.swift                      # Cấu hình Swift Package Manager (Target iOS 15.0)
 ├── README.md                          # Giới thiệu dự án, ảnh chụp màn hình, hướng dẫn cài đặt
 ├── rule.md                            # Quy tắc kiểm soát modifier & an toàn tương thích iOS 15
-├── Scandium.ipa                       # Gói cài đặt hoàn chỉnh dành cho iOS (v1.4.0)
+├── Scandium.ipa                       # Gói cài đặt hoàn chỉnh dành cho iOS (v1.5.1)
 └── xtool.yml                          # Cấu hình biên dịch của công cụ xtool
 ```
 
@@ -482,4 +482,4 @@ Scandium/
    - Ứng dụng **không cung cấp tính năng tải nhạc MP3 ngoại tuyến vĩnh viễn** (No permanent MP3 downloading). Tất cả dữ liệu âm thanh được truyền phát trực tiếp theo luồng và lưu tạm thời trên bộ nhớ đệm tự động dọn dẹp theo cơ chế LRU phục vụ cho trải nghiệm nghe liền mạch, đúng với quy chuẩn của các trình phát web tiêu chuẩn.
 
 ---
-*Tài liệu kỹ thuật được tổng hợp và duy trì bởi MeoHunter cho dự án Scandium (Cập nhật phiên bản 1.4.0).*
+*Tài liệu kỹ thuật được tổng hợp và duy trì bởi MeoHunter cho dự án Scandium (Cập nhật phiên bản 1.5.1).*

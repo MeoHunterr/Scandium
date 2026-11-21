@@ -50,6 +50,7 @@ struct SoundCloudLoginSheet: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .preferredColorScheme(settings.themeMode.colorScheme)
     }
 

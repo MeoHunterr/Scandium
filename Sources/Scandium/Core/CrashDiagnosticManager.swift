@@ -7,9 +7,13 @@
 import Foundation
 import Darwin
 
-// MARK: - File-global crash log FD (must be outside the class, async-signal-safe access)
+// MARK: - File-global crash log FD & pre-allocated buffers (must be outside the class, async-signal-safe access)
 
 private var crashLogFD: Int32 = -1
+private let crashMaxFrames: Int32 = 64
+private var crashFramesBuffer: UnsafeMutablePointer<UnsafeMutableRawPointer?>? = nil
+private var crashHeaderPtr: UnsafeMutablePointer<CChar>? = nil
+private var crashHeaderLen: Int = 0
 
 // MARK: - Crash Diagnostic Manager
 
@@ -32,6 +36,16 @@ final class CrashDiagnosticManager {
     /// Preserves any crash log from the previous session, opens crash log FD (safe context),
     /// then installs signal and exception handlers.
     func install() {
+        if crashFramesBuffer == nil {
+            crashFramesBuffer = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: Int(crashMaxFrames))
+        }
+        if crashHeaderPtr == nil {
+            if let ptr = strdup("=== SCANDIUM CRASH SIGNAL ===\n") {
+                crashHeaderPtr = ptr
+                crashHeaderLen = strlen(ptr)
+            }
+        }
+
         let dirs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
         if let url = dirs.first?.appendingPathComponent(crashFileName) {
             let path = url.path
@@ -147,13 +161,7 @@ final class CrashDiagnosticManager {
 
     /// Clears all user cache data (but not tracks/settings).
     func clearCacheData() {
-        URLCache.shared.removeAllCachedResponses()
-        let tmpDir = NSTemporaryDirectory()
-        if let files = try? FileManager.default.contentsOfDirectory(atPath: tmpDir) {
-            for f in files {
-                try? FileManager.default.removeItem(atPath: (tmpDir as NSString).appendingPathComponent(f))
-            }
-        }
+        StorageManager.shared.clearCache()
     }
 
     // MARK: - Internal: Crash Log File URL
@@ -189,23 +197,19 @@ final class CrashDiagnosticManager {
     // MARK: - Signal Handlers
 
     private func installSignalHandlers() {
-        // Pure C-compatible async-signal-safe handler
-        // ONLY uses: write(), backtrace(), backtrace_symbols_fd(), fsync()
-        // Does NOT call Swift/Foundation heap-allocating APIs
         let handler: @convention(c) (Int32) -> Void = { sig in
             if crashLogFD >= 0 {
-                // Write a minimal ASCII header using write() — async-signal-safe
-                let header = "=== SCANDIUM CRASH SIGNAL ===\n"
-                header.withCString { ptr in
-                    _ = Darwin.write(crashLogFD, ptr, strlen(ptr))
+                if let hdr = crashHeaderPtr, crashHeaderLen > 0 {
+                    _ = Darwin.write(crashLogFD, hdr, crashHeaderLen)
                 }
-                // Dump backtrace directly to FD — async-signal-safe
-                var frames = [UnsafeMutableRawPointer?](repeating: nil, count: 64)
-                let count = backtrace(&frames, 64)
-                backtrace_symbols_fd(&frames, count, crashLogFD)
+                if let buf = crashFramesBuffer {
+                    let count = backtrace(buf, crashMaxFrames)
+                    if count > 0 {
+                        backtrace_symbols_fd(buf, count, crashLogFD)
+                    }
+                }
                 _ = Darwin.fsync(crashLogFD)
             }
-            // Reset to default handler and re-raise so system generates a proper crash report
             Foundation.signal(sig, SIG_DFL)
             raise(sig)
         }
@@ -215,7 +219,7 @@ final class CrashDiagnosticManager {
         Foundation.signal(SIGSEGV, handler)
         Foundation.signal(SIGFPE,  handler)
         Foundation.signal(SIGBUS,  handler)
-        Foundation.signal(SIGPIPE, handler)
+        Foundation.signal(SIGPIPE, SIG_IGN)
         Foundation.signal(SIGTRAP, handler)
     }
 

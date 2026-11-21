@@ -45,13 +45,20 @@ final class LibraryManager: ObservableObject {
     private var locallyLikedDuringSyncIDs = Set<Int>()
     private var locallyUnlikedDuringSyncIDs = Set<Int>()
 
-    // MARK: - Init
+    // MARK: - Init / Deinit
 
     init() {
         openDatabase()
         createTables()
         migrateFromUserDefaultsIfNeeded()
         loadData()
+    }
+
+    deinit {
+        if let db = db {
+            sqlite3_close(db)
+            self.db = nil
+        }
     }
 
     // MARK: - Database Setup
@@ -69,6 +76,10 @@ final class LibraryManager: ObservableObject {
                     sqlite3_close(failedDB)
                 }
                 db = nil
+            } else if let openedDB = db {
+                sqlite3_exec(openedDB, "PRAGMA journal_mode=WAL;", nil, nil, nil)
+                sqlite3_exec(openedDB, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
+                sqlite3_exec(openedDB, "PRAGMA busy_timeout=5000;", nil, nil, nil)
             }
         }
     }
@@ -153,17 +164,17 @@ final class LibraryManager: ObservableObject {
     // MARK: - Load from SQLite
 
     private func loadData() {
-        dbQueue.sync {
-            let liked     = self._queryTracks(table: "liked_tracks")
-            let recent    = self._queryTracks(table: "recently_played")
-            let playlists = self._queryPlaylists()
-            DispatchQueue.main.async {
-                self.likedTracks    = liked
-                self.likedTrackIDs  = Set(liked.map { $0.id })
-                self.recentlyPlayed = recent
-                self.userPlaylists  = playlists
-            }
+        let loaded = dbQueue.sync {
+            (
+                liked: self._queryTracks(table: "liked_tracks"),
+                recent: self._queryTracks(table: "recently_played"),
+                playlists: self._queryPlaylists()
+            )
         }
+        self.likedTracks = loaded.liked
+        self.likedTrackIDs = Set(loaded.liked.map { $0.id })
+        self.recentlyPlayed = loaded.recent
+        self.userPlaylists = loaded.playlists
     }
 
     // MARK: - Liked Tracks API
@@ -187,8 +198,7 @@ final class LibraryManager: ObservableObject {
         }
         guard likedTrackIDs.insert(track.id).inserted else { return }
         likedTracks.insert(track, at: 0)
-        let snapshot = likedTracks
-        dbQueue.async { self._upsertLikedTracks(snapshot) }
+        dbQueue.async { _ = self._insertTrackAtTop(track, table: "liked_tracks") }
     }
 
     func unlike(track: Track) {
@@ -198,13 +208,9 @@ final class LibraryManager: ObservableObject {
         }
         likedTrackIDs.remove(track.id)
         likedTracks.removeAll(where: { $0.id == track.id })
-        let remaining = likedTracks
+        let remainingIDs = likedTracks.map { $0.id }
         dbQueue.async {
-            self._deleteTrack(id: track.id, table: "liked_tracks")
-            // Re-index remaining positions
-            for (pos, t) in remaining.enumerated() {
-                self._updatePosition(id: t.id, position: pos, table: "liked_tracks")
-            }
+            _ = self._deleteTrackAndReindex(id: track.id, remainingIDs: remainingIDs, table: "liked_tracks")
         }
     }
 
@@ -261,6 +267,8 @@ final class LibraryManager: ObservableObject {
             }
             likedTracks = localAdditions + uniquePage + remaining
             likedTrackIDs = Set(likedTracks.map { $0.id })
+            let snapshot = likedTracks
+            dbQueue.async { self._upsertLikedTracks(snapshot) }
         } else {
             var added: [Track] = []
             for t in filteredPageTracks {
@@ -268,10 +276,19 @@ final class LibraryManager: ObservableObject {
                     added.append(t)
                 }
             }
+            guard !added.isEmpty else { return }
+            let startPosition = likedTracks.count
             likedTracks.append(contentsOf: added)
+            dbQueue.async {
+                _ = self._writeRows(
+                    items: added,
+                    idProvider: { $0.id },
+                    table: "liked_tracks",
+                    replaceExisting: false,
+                    startingPosition: startPosition
+                )
+            }
         }
-        let snapshot = likedTracks
-        dbQueue.async { self._upsertLikedTracks(snapshot) }
     }
 
     /// Prunes any local liked tracks that were not returned during full sync.
@@ -422,7 +439,8 @@ final class LibraryManager: ObservableObject {
         items: [Item],
         idProvider: (Item) -> Int,
         table: String,
-        replaceExisting: Bool
+        replaceExisting: Bool,
+        startingPosition: Int = 0
     ) -> Bool {
         guard let db = db, _isValidTable(table) else { return false }
         return _executeTransaction(db) {
@@ -431,26 +449,91 @@ final class LibraryManager: ObservableObject {
                     return false
                 }
             }
+            guard !items.isEmpty else { return true }
             let encoder = JSONEncoder()
             let sql = "INSERT OR REPLACE INTO \(table) (id, json_data, position) VALUES (?, ?, ?);"
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                sqlite3_finalize(stmt)
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+
             for (pos, item) in items.enumerated() {
                 guard let data = try? encoder.encode(item),
                       let jsonStr = String(data: data, encoding: .utf8) else {
                     return false
                 }
-                var stmt: OpaquePointer?
-                guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-                    sqlite3_finalize(stmt)
-                    return false
-                }
+                sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
                 sqlite3_bind_int64(stmt, 1, Int64(idProvider(item)))
                 _ = jsonStr.withCString { cStr in
                     sqlite3_bind_text(stmt, 2, cStr, -1, SQLITE_TRANSIENT)
                 }
-                sqlite3_bind_int64(stmt, 3, Int64(pos))
-                let stepRC = sqlite3_step(stmt)
+                sqlite3_bind_int64(stmt, 3, Int64(startingPosition + pos))
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+
+    private func _insertTrackAtTop(_ track: Track, table: String) -> Bool {
+        guard let db = db, _isValidTable(table) else { return false }
+        guard let data = try? JSONEncoder().encode(track),
+              let jsonStr = String(data: data, encoding: .utf8) else {
+            return false
+        }
+        return _executeTransaction(db) {
+            guard sqlite3_exec(db, "UPDATE \(table) SET position = position + 1;", nil, nil, nil) == SQLITE_OK else {
+                return false
+            }
+            var stmt: OpaquePointer?
+            let sql = "INSERT OR REPLACE INTO \(table) (id, json_data, position) VALUES (?, ?, 0);"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
                 sqlite3_finalize(stmt)
-                guard stepRC == SQLITE_DONE else {
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_int64(stmt, 1, Int64(track.id))
+            _ = jsonStr.withCString { cStr in
+                sqlite3_bind_text(stmt, 2, cStr, -1, SQLITE_TRANSIENT)
+            }
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+    }
+
+    private func _deleteTrackAndReindex(id: Int, remainingIDs: [Int], table: String) -> Bool {
+        guard let db = db, _isValidTable(table) else { return false }
+        return _executeTransaction(db) {
+            var delStmt: OpaquePointer?
+            let delSQL = "DELETE FROM \(table) WHERE id = ?;"
+            guard sqlite3_prepare_v2(db, delSQL, -1, &delStmt, nil) == SQLITE_OK else {
+                sqlite3_finalize(delStmt)
+                return false
+            }
+            sqlite3_bind_int64(delStmt, 1, Int64(id))
+            let delRC = sqlite3_step(delStmt)
+            sqlite3_finalize(delStmt)
+            guard delRC == SQLITE_DONE else { return false }
+
+            guard !remainingIDs.isEmpty else { return true }
+
+            var updStmt: OpaquePointer?
+            let updSQL = "UPDATE \(table) SET position = ? WHERE id = ?;"
+            guard sqlite3_prepare_v2(db, updSQL, -1, &updStmt, nil) == SQLITE_OK else {
+                sqlite3_finalize(updStmt)
+                return false
+            }
+            defer { sqlite3_finalize(updStmt) }
+
+            for (pos, itemID) in remainingIDs.enumerated() {
+                sqlite3_reset(updStmt)
+                sqlite3_clear_bindings(updStmt)
+                sqlite3_bind_int64(updStmt, 1, Int64(pos))
+                sqlite3_bind_int64(updStmt, 2, Int64(itemID))
+                guard sqlite3_step(updStmt) == SQLITE_DONE else {
                     return false
                 }
             }
@@ -480,29 +563,6 @@ final class LibraryManager: ObservableObject {
     @discardableResult
     private func _insertPlaylists(_ playlists: [SoundCloudPlaylist]) -> Bool {
         _writeRows(items: playlists, idProvider: { $0.id }, table: "playlists", replaceExisting: true)
-    }
-
-    private func _deleteTrack(id: Int, table: String) {
-        guard let db = db, _isValidTable(table) else { return }
-        var stmt: OpaquePointer?
-        let sql = "DELETE FROM \(table) WHERE id = ?;"
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_int64(stmt, 1, Int64(id))
-            _ = sqlite3_step(stmt)
-        }
-        sqlite3_finalize(stmt)
-    }
-
-    private func _updatePosition(id: Int, position: Int, table: String) {
-        guard let db = db, _isValidTable(table) else { return }
-        var stmt: OpaquePointer?
-        let sql = "UPDATE \(table) SET position = ? WHERE id = ?;"
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            sqlite3_bind_int64(stmt, 1, Int64(position))
-            sqlite3_bind_int64(stmt, 2, Int64(id))
-            _ = sqlite3_step(stmt)
-        }
-        sqlite3_finalize(stmt)
     }
 
     private func _deleteAll(table: String) {

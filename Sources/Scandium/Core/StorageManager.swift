@@ -15,9 +15,6 @@ final class StorageManager: ObservableObject {
 
     private init() {
         // Storage values start at 0; refreshUsage() is called lazily from ProfileView.onAppear
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            self?.evictAudioTempIfNeeded()
-        }
     }
 
     // MARK: - Formatters

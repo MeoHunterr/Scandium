@@ -160,7 +160,8 @@ struct Track: Codable, Identifiable, Equatable, Hashable {
     }
 
     static func formatDuration(_ seconds: TimeInterval) -> String {
-        let totalSeconds = Int(seconds)
+        guard seconds.isFinite && seconds > 0 else { return "0:00" }
+        let totalSeconds = Int(min(seconds, Double(Int.max / 2)))
         let hrs = totalSeconds / 3600
         let mins = (totalSeconds % 3600) / 60
         let secs = totalSeconds % 60
@@ -353,10 +354,6 @@ struct WaveformData: Codable {
 
 // MARK: - Playlist Model
 
-private struct PlaylistTrackStub: Decodable {
-    let id: Int?
-}
-
 struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
     let id: Int
     let title: String
@@ -366,6 +363,8 @@ struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
     let artworkURL: String?
     let permalinkURL: String?
     let tracks: [Track]?
+    let trackIDs: [Int]?
+    let isAlbum: Bool?
     let user: SoundCloudUser?
 
     enum CodingKeys: String, CodingKey {
@@ -373,6 +372,8 @@ struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
         case trackCount = "track_count"
         case artworkURL = "artwork_url"
         case permalinkURL = "permalink_url"
+        case trackIDs = "track_ids"
+        case isAlbum = "is_album"
     }
 
     init(
@@ -384,6 +385,8 @@ struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
         artworkURL: String? = nil,
         permalinkURL: String? = nil,
         tracks: [Track]? = nil,
+        trackIDs: [Int]? = nil,
+        isAlbum: Bool? = nil,
         user: SoundCloudUser? = nil
     ) {
         self.id = id
@@ -394,6 +397,8 @@ struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
         self.artworkURL = artworkURL
         self.permalinkURL = permalinkURL
         self.tracks = tracks
+        self.trackIDs = trackIDs
+        self.isAlbum = isAlbum
         self.user = user
     }
 
@@ -406,28 +411,49 @@ struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
         self.trackCount = try? container.decodeIfPresent(Int.self, forKey: .trackCount)
         self.artworkURL = try? container.decodeIfPresent(String.self, forKey: .artworkURL)
         self.permalinkURL = try? container.decodeIfPresent(String.self, forKey: .permalinkURL)
+        self.isAlbum = try? container.decodeIfPresent(Bool.self, forKey: .isAlbum)
         self.user = try? container.decodeIfPresent(SoundCloudUser.self, forKey: .user)
+
+        let persistedTrackIDs = try? container.decodeIfPresent([Int].self, forKey: .trackIDs)
 
         // Resilient tracks decoding:
         // SoundCloud playlist summaries often include track stubs with only {"id": 123}, null, or malformed entries.
-        // We decode full tracks if present and always consume the current element to prevent infinite loops.
+        // We decode full tracks if present, retain stub IDs for hydration, and always consume the current element to prevent infinite loops.
         struct PermissiveTrackElement: Decodable {
             let track: Track?
+            let stubID: Int?
+            enum StubKey: String, CodingKey { case id }
             init(from decoder: Decoder) throws {
-                self.track = try? Track(from: decoder)
+                if let full = try? Track(from: decoder) {
+                    self.track = full
+                    self.stubID = full.id
+                } else if let c = try? decoder.container(keyedBy: StubKey.self),
+                          let id = try? c.decode(Int.self, forKey: .id) {
+                    self.track = nil
+                    self.stubID = id
+                } else {
+                    self.track = nil
+                    self.stubID = nil
+                }
             }
         }
 
         if let directTracks = try? container.decodeIfPresent([Track].self, forKey: .tracks) {
             self.tracks = directTracks
+            self.trackIDs = persistedTrackIDs ?? (directTracks.isEmpty ? nil : directTracks.map { $0.id })
         } else if var tracksUnkeyed = try? container.nestedUnkeyedContainer(forKey: .tracks) {
             var validTracks: [Track] = []
+            var collectedIDs: [Int] = []
             while !tracksUnkeyed.isAtEnd {
                 let previousIndex = tracksUnkeyed.currentIndex
                 do {
-                    if let element = try tracksUnkeyed.decodeIfPresent(PermissiveTrackElement.self),
-                       let track = element.track {
-                        validTracks.append(track)
+                    if let element = try tracksUnkeyed.decodeIfPresent(PermissiveTrackElement.self) {
+                        if let stubID = element.stubID {
+                            collectedIDs.append(stubID)
+                        }
+                        if let track = element.track {
+                            validTracks.append(track)
+                        }
                     }
                 } catch {
                     if tracksUnkeyed.currentIndex == previousIndex {
@@ -439,8 +465,10 @@ struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
                 }
             }
             self.tracks = validTracks.isEmpty ? nil : validTracks
+            self.trackIDs = persistedTrackIDs ?? (collectedIDs.isEmpty ? nil : collectedIDs)
         } else {
             self.tracks = nil
+            self.trackIDs = persistedTrackIDs
         }
     }
 
@@ -454,7 +482,15 @@ struct SoundCloudPlaylist: Codable, Identifiable, Equatable, Hashable {
         try container.encodeIfPresent(artworkURL, forKey: .artworkURL)
         try container.encodeIfPresent(permalinkURL, forKey: .permalinkURL)
         try container.encodeIfPresent(tracks, forKey: .tracks)
+        try container.encodeIfPresent(trackIDs, forKey: .trackIDs)
+        try container.encodeIfPresent(isAlbum, forKey: .isAlbum)
         try container.encodeIfPresent(user, forKey: .user)
+    }
+
+    var isAlbumPlaylist: Bool {
+        if let isAlbum = isAlbum { return isAlbum }
+        let lower = title.lowercased()
+        return (trackCount ?? 0) >= 5 || lower.contains("album") || lower.contains("ep")
     }
 
     static func == (lhs: SoundCloudPlaylist, rhs: SoundCloudPlaylist) -> Bool {

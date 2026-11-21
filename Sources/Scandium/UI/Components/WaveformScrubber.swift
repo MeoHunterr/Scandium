@@ -15,6 +15,8 @@ struct WaveformScrubber: View {
 
     @State private var isDragging: Bool = false
     @State private var dragProgress: Double = 0
+    @State private var cachedBars: [Float] = []
+    @State private var cachedWidth: CGFloat = 0
 
     init(
         samples: [Float],
@@ -39,7 +41,7 @@ struct WaveformScrubber: View {
         GeometryReader { geometry in
             let totalWidth = max(1, geometry.size.width)
             let totalHeight = max(1, geometry.size.height)
-            let displaySamples = downsample(to: totalWidth)
+            let displaySamples = (!cachedBars.isEmpty && abs(totalWidth - cachedWidth) <= 4) ? cachedBars : downsample(to: totalWidth)
             let barWidth = max(1.5, (totalWidth - barSpacing * CGFloat(displaySamples.count - 1)) / CGFloat(max(1, displaySamples.count)))
             let activeProgress = isDragging ? dragProgress : progress
 
@@ -58,6 +60,20 @@ struct WaveformScrubber: View {
 
                 if isDragging {
                     scrubberIndicator(totalHeight: totalHeight, totalWidth: totalWidth, progress: dragProgress)
+                }
+            }
+            .onAppear {
+                cachedWidth = totalWidth
+                cachedBars = downsample(to: totalWidth)
+            }
+            .onChange(of: samples) { _ in
+                cachedWidth = totalWidth
+                cachedBars = downsample(to: totalWidth)
+            }
+            .onChange(of: totalWidth) { newWidth in
+                if abs(newWidth - cachedWidth) > 4 || cachedBars.isEmpty {
+                    cachedWidth = newWidth
+                    cachedBars = downsample(to: newWidth)
                 }
             }
             .contentShape(Rectangle())
@@ -152,6 +168,8 @@ struct SimpleProgressScrubber: View {
 
     @State private var isDragging: Bool = false
     @State private var dragProgress: Double = 0
+    @State private var cachedBars: [Float] = []
+    @State private var cachedWidth: CGFloat = 0
 
     init(
         progress: Binding<Double>,
@@ -165,8 +183,10 @@ struct SimpleProgressScrubber: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let totalWidth = geometry.size.width
+            let totalWidth = max(1, geometry.size.width)
             let activeProgress = isDragging ? dragProgress : progress
+            let clampedBuffered = max(0, min(1, bufferedProgress))
+            let clampedActive = max(0, min(1, activeProgress))
 
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 2)
@@ -175,17 +195,17 @@ struct SimpleProgressScrubber: View {
 
                 RoundedRectangle(cornerRadius: 2)
                     .fill(Color.white.opacity(0.08))
-                    .frame(width: CGFloat(bufferedProgress) * totalWidth, height: 4)
+                    .frame(width: CGFloat(clampedBuffered) * totalWidth, height: 4)
 
                 RoundedRectangle(cornerRadius: 2)
                     .fill(Color.white)
-                    .frame(width: CGFloat(activeProgress) * totalWidth, height: 4)
+                    .frame(width: CGFloat(clampedActive) * totalWidth, height: 4)
 
                 Circle()
                     .fill(Color.white)
                     .frame(width: isDragging ? 16 : 10, height: isDragging ? 16 : 10)
                     .shadow(color: .white.opacity(0.3), radius: 4)
-                    .offset(x: CGFloat(activeProgress) * totalWidth - (isDragging ? 8 : 5))
+                    .offset(x: CGFloat(clampedActive) * totalWidth - (isDragging ? 8 : 5))
                     .animation(.interactiveSpring(), value: isDragging)
             }
             .frame(maxHeight: .infinity)

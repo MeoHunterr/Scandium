@@ -470,6 +470,13 @@ final class DiscoverDataStore: ObservableObject {
     private var loadGeneration: Int = 0
     private let cacheKey = "scandium_discover_cached_payload_v2"
     private let legacyCacheKey = "scandium_discover_cached_payload_v1"
+    private static let cacheFileName = "scandium_discover_cache_v2.json"
+    private let cacheIOQueue = DispatchQueue(label: "com.scandium.discoverCache.io", qos: .utility)
+
+    private var cacheFileURL: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(Self.cacheFileName)
+    }
 
     struct GenreCategory {
         let nameVI: String
@@ -510,9 +517,21 @@ final class DiscoverDataStore: ObservableObject {
     }
 
     private func loadCachedFeed() {
-        let ud = UserDefaults.standard
-        let data = ud.data(forKey: cacheKey) ?? ud.data(forKey: legacyCacheKey)
-        guard let data = data,
+        var loadedData: Data? = nil
+        var needsMigration = false
+
+        if let fileURL = cacheFileURL,
+           let fileData = try? Data(contentsOf: fileURL) {
+            loadedData = fileData
+        } else {
+            let ud = UserDefaults.standard
+            if let udData = ud.data(forKey: cacheKey) ?? ud.data(forKey: legacyCacheKey) {
+                loadedData = udData
+                needsMigration = true
+            }
+        }
+
+        guard let data = loadedData,
               let payload = try? JSONDecoder().decode(DiscoverCachePayload.self, from: data) else {
             return
         }
@@ -530,6 +549,17 @@ final class DiscoverDataStore: ObservableObject {
         self.artistSpotlightTitle = payload.artistSpotlightTitle ?? ""
         self.artistSpotlightSubtitle = payload.artistSpotlightSubtitle
         self.hasLoaded = true
+
+        if needsMigration {
+            let fileURL = cacheFileURL
+            cacheIOQueue.async {
+                if let url = fileURL {
+                    try? data.write(to: url, options: .atomic)
+                }
+            }
+            UserDefaults.standard.removeObject(forKey: cacheKey)
+            UserDefaults.standard.removeObject(forKey: legacyCacheKey)
+        }
     }
 
     private func saveCachedFeed() {
@@ -548,8 +578,16 @@ final class DiscoverDataStore: ObservableObject {
             genre1Title: genre1Title,
             genre2Title: genre2Title
         )
-        if let data = try? JSONEncoder().encode(payload) {
-            UserDefaults.standard.set(data, forKey: cacheKey)
+        let fileURL = cacheFileURL
+        let legacyV2 = cacheKey
+        let legacyV1 = legacyCacheKey
+        cacheIOQueue.async {
+            if let url = fileURL,
+               let data = try? JSONEncoder().encode(payload) {
+                try? data.write(to: url, options: .atomic)
+                UserDefaults.standard.removeObject(forKey: legacyV2)
+                UserDefaults.standard.removeObject(forKey: legacyV1)
+            }
         }
     }
 
@@ -603,22 +641,48 @@ final class DiscoverDataStore: ObservableObject {
             self.error = nil
         }
 
-        let auth = SoundCloudAuthManager.shared
-        let library = LibraryManager.shared
+        let snapshot = await MainActor.run {
+            (
+                recentlyPlayed: LibraryManager.shared.recentlyPlayed,
+                likedTracks: LibraryManager.shared.likedTracks,
+                isAuthenticated: SoundCloudAuthManager.shared.isAuthenticated,
+                oauthToken: SoundCloudAuthManager.shared.oauthToken,
+                userLikedTracks: SoundCloudAuthManager.shared.userLikedTracks,
+                isEnglish: AppSettings.shared.language == .english
+            )
+        }
 
         // PHASE 1: Personalized Seed Sampling, Global Charts & Following Feed (max ~3-4 concurrent requests)
-        async let seedTask = fetchRandomSeedRecommendations(api: api, auth: auth, library: library)
+        async let seedTask = fetchRandomSeedRecommendations(
+            api: api,
+            recentlyPlayed: snapshot.recentlyPlayed,
+            likedTracks: snapshot.likedTracks,
+            userLikedTracks: snapshot.userLikedTracks,
+            isAuthenticated: snapshot.isAuthenticated,
+            isEnglish: snapshot.isEnglish
+        )
         async let trendingTask = fetchTrendingCharts(api: api)
-        async let followingTask = fetchFollowingStreamTracks(api: api, auth: auth)
+        async let followingTask = fetchFollowingStreamTracks(
+            api: api,
+            isAuthenticated: snapshot.isAuthenticated,
+            oauthToken: snapshot.oauthToken
+        )
 
         let (seedResult, trendingResult, followingResult) = await (seedTask, trendingTask, followingTask)
         if Task.isCancelled { return }
 
         // PHASE 2: Favorite Artist Spotlight & 2 Dynamic Genre Carousels (max ~2-3 concurrent requests)
         let selectedGenres = Array(Self.genrePool.shuffled().prefix(2))
-        async let artistTask = fetchFavoriteArtistSpotlight(api: api, auth: auth, library: library)
-        async let genre1Task = fetchGenreSection(api: api, genre: selectedGenres[0])
-        async let genre2Task = fetchGenreSection(api: api, genre: selectedGenres[1])
+        async let artistTask = fetchFavoriteArtistSpotlight(
+            api: api,
+            recentlyPlayed: snapshot.recentlyPlayed,
+            likedTracks: snapshot.likedTracks,
+            userLikedTracks: snapshot.userLikedTracks,
+            isAuthenticated: snapshot.isAuthenticated,
+            isEnglish: snapshot.isEnglish
+        )
+        async let genre1Task = fetchGenreSection(api: api, genre: selectedGenres[0], isEnglish: snapshot.isEnglish)
+        async let genre2Task = fetchGenreSection(api: api, genre: selectedGenres[1], isEnglish: snapshot.isEnglish)
 
         let (artistResult, g1Result, g2Result) = await (artistTask, genre1Task, genre2Task)
         if Task.isCancelled { return }
@@ -682,15 +746,18 @@ final class DiscoverDataStore: ObservableObject {
 
     private func fetchRandomSeedRecommendations(
         api: SoundCloudAPI,
-        auth: SoundCloudAuthManager,
-        library: LibraryManager
+        recentlyPlayed: [Track],
+        likedTracks: [Track],
+        userLikedTracks: [Track],
+        isAuthenticated: Bool,
+        isEnglish: Bool
     ) async -> (title: String, subtitle: String?, tracks: [Track]) {
-        let isEn = AppSettings.shared.language == .english
+        let isEn = isEnglish
         var seeds: [Track] = []
         var seedIDs = Set<Int>()
 
         // 1. Pick up to 2 random tracks from recent 20 in recentlyPlayed
-        let recentPool = Array(library.recentlyPlayed.prefix(20)).shuffled()
+        let recentPool = Array(recentlyPlayed.prefix(20)).shuffled()
         for track in recentPool {
             if seedIDs.insert(track.id).inserted {
                 seeds.append(track)
@@ -699,7 +766,7 @@ final class DiscoverDataStore: ObservableObject {
         }
 
         // 2. Pick up to 2 random tracks from entire likedTracks (shuffled to surface older favorites)
-        let likedPool = (library.likedTracks + (auth.isAuthenticated ? auth.userLikedTracks : [])).shuffled()
+        let likedPool = (likedTracks + (isAuthenticated ? userLikedTracks : [])).shuffled()
         var likedAdded = 0
         for track in likedPool {
             if seedIDs.insert(track.id).inserted {
@@ -734,7 +801,7 @@ final class DiscoverDataStore: ObservableObject {
         // - Deduplicate by ID
         // - Defer songs in the last 15 of recentlyPlayed to the end
         // - Shuffle final candidates
-        let recent15IDs = Set(library.recentlyPlayed.prefix(15).map(\.id))
+        let recent15IDs = Set(recentlyPlayed.prefix(15).map(\.id))
         var seenIDs = Set<Int>()
         var freshTracks: [Track] = []
         var deferredTracks: [Track] = []
@@ -767,8 +834,12 @@ final class DiscoverDataStore: ObservableObject {
 
     // MARK: - Tier 2: Real Following Feed & Favorite Artist Spotlight
 
-    private func fetchFollowingStreamTracks(api: SoundCloudAPI, auth: SoundCloudAuthManager) async -> [Track] {
-        guard auth.isAuthenticated, let token = auth.oauthToken, !token.isEmpty else {
+    private func fetchFollowingStreamTracks(
+        api: SoundCloudAPI,
+        isAuthenticated: Bool,
+        oauthToken: String?
+    ) async -> [Track] {
+        guard isAuthenticated, let token = oauthToken, !token.isEmpty else {
             return []
         }
         do {
@@ -781,11 +852,14 @@ final class DiscoverDataStore: ObservableObject {
 
     private func fetchFavoriteArtistSpotlight(
         api: SoundCloudAPI,
-        auth: SoundCloudAuthManager,
-        library: LibraryManager
+        recentlyPlayed: [Track],
+        likedTracks: [Track],
+        userLikedTracks: [Track],
+        isAuthenticated: Bool,
+        isEnglish: Bool
     ) async -> (title: String, subtitle: String?, tracks: [Track]) {
-        let isEn = AppSettings.shared.language == .english
-        let allTracks = library.likedTracks + library.recentlyPlayed + (auth.isAuthenticated ? auth.userLikedTracks : [])
+        let isEn = isEnglish
+        let allTracks = likedTracks + recentlyPlayed + (isAuthenticated ? userLikedTracks : [])
         var artistFrequency: [Int: (user: SoundCloudUser, count: Int)] = [:]
 
         for track in allTracks {
@@ -850,9 +924,10 @@ final class DiscoverDataStore: ObservableObject {
 
     private func fetchGenreSection(
         api: SoundCloudAPI,
-        genre: GenreCategory
+        genre: GenreCategory,
+        isEnglish: Bool
     ) async -> (title: String, tracks: [Track]) {
-        let isEn = AppSettings.shared.language == .english
+        let isEn = isEnglish
         let title = isEn ? genre.nameEN : genre.nameVI
         let offset = [0, 10, 20].randomElement() ?? 0
         let tracks = await safeSearch(api: api, query: genre.query, limit: 15, offset: offset)
@@ -923,6 +998,17 @@ struct ClientIDConfigModal: View {
                         .padding(14)
                         .background(ScandiumTheme.surfaceDark)
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        if let toast = statusToast {
+                            Text(toast)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(scraper.lastError == nil ? ScandiumTheme.spotifyGreen : Color.orange)
+                                .lineLimit(nil)
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(ScandiumTheme.surfaceDark)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
 
                         // Current ID info
                         if let current = scraper.currentClientID {
@@ -995,8 +1081,15 @@ struct ClientIDConfigModal: View {
 
                             HStack(spacing: 10) {
                                 Button(action: {
-                                    scraper.setManualClientID(inputID)
-                                    presentationMode.wrappedValue.dismiss()
+                                    if scraper.setManualClientID(inputID) {
+                                        statusToast = nil
+                                        presentationMode.wrappedValue.dismiss()
+                                    } else {
+                                        statusToast = scraper.lastError ?? settings.loc(
+                                            "Client ID không hợp lệ (cần đúng 32 ký tự chữ và số).",
+                                            "Invalid Client ID (must be exactly 32 alphanumeric characters)."
+                                        )
+                                    }
                                 }) {
                                     Text(settings.loc("Lưu Client ID", "Save Client ID"))
                                         .font(.system(size: 14, weight: .semibold))
@@ -1011,6 +1104,7 @@ struct ClientIDConfigModal: View {
                                     Button(action: {
                                         scraper.setManualClientID(nil)
                                         inputID = ""
+                                        statusToast = nil
                                         presentationMode.wrappedValue.dismiss()
                                     }) {
                                         Text(settings.loc("Khôi phục", "Reset"))
@@ -1060,6 +1154,7 @@ struct ClientIDConfigModal: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .preferredColorScheme(settings.themeMode.colorScheme)
     }
 }

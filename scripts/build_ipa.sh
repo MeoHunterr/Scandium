@@ -8,6 +8,20 @@
 
 set -euo pipefail
 
+ALLOW_UNSIGNED="${ALLOW_UNSIGNED:-0}"
+for arg in "$@"; do
+    case "$arg" in
+        --allow-unsigned)
+            ALLOW_UNSIGNED=1
+            ;;
+        *)
+            echo "ERROR: Unknown argument: ${arg}" >&2
+            echo "Usage: $0 [--allow-unsigned]" >&2
+            exit 1
+            ;;
+    esac
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 APP_NAME="Scandium"
@@ -24,7 +38,7 @@ echo ""
 # -------------------------------------------------------------------
 # Step 1: Build with xtool
 # -------------------------------------------------------------------
-echo "[1/4] Building ${APP_NAME} with xtool dev build (-c release)..."
+echo "[1/5] Building ${APP_NAME} with xtool dev build (-c release)..."
 cd "${PROJECT_ROOT}"
 xtool dev build -c release
 
@@ -34,7 +48,7 @@ echo ""
 # -------------------------------------------------------------------
 # Step 2: Locate output .app bundle
 # -------------------------------------------------------------------
-echo "[2/4] Locating ${APP_NAME}.app bundle..."
+echo "[2/5] Locating ${APP_NAME}.app bundle..."
 
 APP_BUNDLE=""
 CANDIDATE_PATHS=(
@@ -115,7 +129,14 @@ if command -v ldid > /dev/null 2>&1; then
         done
     fi
 else
-    echo "WARNING: ldid not found in PATH. Skipping pseudo-signing step."
+    if [ "${ALLOW_UNSIGNED}" = "1" ]; then
+        echo "WARNING: ldid not found in PATH (--allow-unsigned / ALLOW_UNSIGNED=1 enabled)."
+        echo "         Scandium.ipa will be UNSIGNED without embedded entitlements!"
+    else
+        echo "ERROR: ldid not found in PATH. Pseudo-signing with entitlements.plist is required for TrollStore." >&2
+        echo "       Install ldid, or re-run with --allow-unsigned (or ALLOW_UNSIGNED=1) for a local unsigned test build." >&2
+        exit 1
+    fi
 fi
 
 echo ""

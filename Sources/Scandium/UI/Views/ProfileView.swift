@@ -3,6 +3,17 @@
 
 import SwiftUI
 
+private enum ProfileSheet: Int, Identifiable {
+    case settings
+    case soundCloudLogin
+    case manualAuth
+    case manualClientID
+    case clientIDGuide
+    case oauthGuide
+
+    var id: Int { rawValue }
+}
+
 struct ProfileView: View {
     @EnvironmentObject var scraper: ClientIDScraper
     @EnvironmentObject var library: LibraryManager
@@ -10,15 +21,10 @@ struct ProfileView: View {
     @ObservedObject private var storage = StorageManager.shared
     @ObservedObject private var settings = AppSettings.shared
 
-    @State private var showSettingsSheet: Bool = false
-    @State private var showSoundCloudLoginSheet: Bool = false
-    @State private var showWebLogin: Bool = false
-    @State private var showManualAuthModal: Bool = false
-    @State private var showManualIDModal: Bool = false
-    @State private var showGuideSheet: Bool = false
-    @State private var showOAuthGuideSheet: Bool = false
+    @State private var activeSheet: ProfileSheet? = nil
+    @State private var showOAuthGuideInManualAuth: Bool = false
+    @State private var manualClientIDError: String? = nil
     @State private var showClearCacheAlert: Bool = false
-    @State private var showResetDataAlert: Bool = false
     @State private var toastMessage: String?
 
     @State private var manualAuthInput: String = ""
@@ -46,45 +52,29 @@ struct ProfileView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 130)
         }
-        .sheet(isPresented: $showSoundCloudLoginSheet) {
-            SoundCloudLoginSheet(
-                isPresented: $showSoundCloudLoginSheet,
-                onLoginSuccess: {
-                    showToast(settings.loc("Đăng nhập và đồng bộ SoundCloud thành công!", "SoundCloud logged in and synced successfully!"))
-                }
-            )
-        }
-        .sheet(isPresented: $showWebLogin) {
-            SoundCloudWebLoginView(
-                isPresented: $showWebLogin,
-                onTokenCaptured: { token in
-                    Task {
-                        await auth.handleOAuthToken(token)
-                        showToast(settings.loc("Đồng bộ tài khoản thành công!", "Account synchronized successfully!"))
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .settings:
+                SettingsSheetView()
+            case .soundCloudLogin:
+                SoundCloudLoginSheet(
+                    isPresented: Binding(
+                        get: { activeSheet == .soundCloudLogin },
+                        set: { if !$0 && activeSheet == .soundCloudLogin { activeSheet = nil } }
+                    ),
+                    onLoginSuccess: {
+                        showToast(settings.loc("Đăng nhập và đồng bộ SoundCloud thành công!", "SoundCloud logged in and synced successfully!"))
                     }
-                },
-                onProfileSubmitted: { profile in
-                    Task {
-                        await auth.handleProfileURL(profile)
-                        showToast(settings.loc("Đã kết nối tài khoản qua link hồ sơ!", "Connected account via profile link!"))
-                    }
-                }
-            )
-        }
-        .sheet(isPresented: $showGuideSheet) {
-            ClientIDGuideSheet()
-        }
-        .sheet(isPresented: $showManualAuthModal) {
-            manualAuthSheet
-        }
-        .sheet(isPresented: $showManualIDModal) {
-            manualClientIDSheet
-        }
-        .sheet(isPresented: $showOAuthGuideSheet) {
-            OAuthTokenGuideSheet()
-        }
-        .sheet(isPresented: $showSettingsSheet) {
-            SettingsSheetView()
+                )
+            case .manualAuth:
+                manualAuthSheet
+            case .manualClientID:
+                manualClientIDSheet
+            case .clientIDGuide:
+                ClientIDGuideSheet()
+            case .oauthGuide:
+                OAuthTokenGuideSheet()
+            }
         }
         .alert(isPresented: $showClearCacheAlert) {
             Alert(
@@ -92,7 +82,6 @@ struct ProfileView: View {
                 message: Text(settings.loc("Hệ thống sẽ xóa ảnh bìa và file âm thanh tạm. Bài hát đã thích và thiết lập của bạn sẽ được giữ nguyên.", "Cached artwork and temporary audio files will be deleted. Your liked tracks and settings will be preserved.")),
                 primaryButton: .destructive(Text(settings.loc("Dọn sạch ngay", "Clear Now"))) {
                     storage.clearCache()
-                    ImageCacheStore.shared.clear()
                     showToast(settings.loc("Đã dọn sạch cache tạm!", "Temporary cache cleared!"))
                 },
                 secondaryButton: .cancel(Text(settings.loc("Hủy", "Cancel")))
@@ -119,7 +108,7 @@ struct ProfileView: View {
 
             Spacer()
 
-            Button(action: { showSettingsSheet = true }) {
+            Button(action: { activeSheet = .settings }) {
                 Image(systemName: "gearshape.fill")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(ScandiumTheme.textPrimary)
@@ -134,7 +123,7 @@ struct ProfileView: View {
     // MARK: - Settings Section Card
 
     private var settingsSectionCard: some View {
-        Button(action: { showSettingsSheet = true }) {
+        Button(action: { activeSheet = .settings }) {
             ThreadsRow(
                 icon: "gearshape.2.fill",
                 iconColor: ScandiumTheme.spotifyGreen,
@@ -156,7 +145,7 @@ struct ProfileView: View {
 
     private var profileHeaderCard: some View {
         HStack(spacing: 14) {
-            if auth.isAuthenticated, let user = auth.currentUser {
+            if auth.isLoggedIn, let user = auth.currentUser {
                 CachedAsyncImage(
                     url: user.highResAvatarURL,
                     width: 52,
@@ -175,16 +164,16 @@ struct ProfileView: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                if auth.isAuthenticated, let user = auth.currentUser {
+                if auth.isLoggedIn, let user = auth.currentUser {
                     HStack(spacing: 6) {
                         Text(user.username)
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(ScandiumTheme.textPrimary)
-                        Image(systemName: "checkmark.seal.fill")
+                        Image(systemName: auth.isAuthenticated ? "checkmark.seal.fill" : "person.crop.circle")
                             .font(.system(size: 12))
                             .foregroundColor(ScandiumTheme.spotifyGreen)
                     }
-                    Text(user.fullName ?? settings.loc("Tài khoản dịch vụ (SoundCloud)", "Service Account (SoundCloud)"))
+                    Text(user.fullName ?? (auth.isPublicProfile ? settings.loc("Hồ sơ công khai (SoundCloud)", "Public Profile (SoundCloud)") : settings.loc("Tài khoản dịch vụ (SoundCloud)", "Service Account (SoundCloud)")))
                         .font(.system(size: 12))
                         .foregroundColor(ScandiumTheme.subtext)
                 } else {
@@ -221,7 +210,7 @@ struct ProfileView: View {
             VStack(spacing: 0) {
                 if !auth.isLoggedIn {
                     // Nút bấm phong cách tối giản: "Đồng bộ tài khoản SoundCloud" kèm icon person.crop.circle.badge.plus
-                    Button(action: { showSoundCloudLoginSheet = true }) {
+                    Button(action: { activeSheet = .soundCloudLogin }) {
                         HStack(spacing: 12) {
                             Image(systemName: "person.crop.circle.badge.plus")
                                 .font(.system(size: 20))
@@ -252,7 +241,7 @@ struct ProfileView: View {
 
                     // PHẦN ĐĂNG NHẬP NÂNG CAO NHỎ Ở DƯỚI ĐĂNG NHẬP CHÍNH
                     // 1. Nhập Token / Link hồ sơ thủ công
-                    Button(action: { showManualAuthModal = true }) {
+                    Button(action: { activeSheet = .manualAuth }) {
                         HStack(spacing: 10) {
                             Image(systemName: "key.horizontal")
                                 .font(.system(size: 13))
@@ -277,7 +266,7 @@ struct ProfileView: View {
 
                     HairlineDivider()
 
-                    Button(action: { showOAuthGuideSheet = true }) {
+                    Button(action: { activeSheet = .oauthGuide }) {
                         HStack(spacing: 10) {
                             Image(systemName: "questionmark.circle")
                                 .font(.system(size: 13))
@@ -361,11 +350,12 @@ struct ProfileView: View {
                             showToast(settings.loc("Đã đồng bộ bài hát từ tài khoản!", "Synced library from account!"))
                         }
                     }) {
+                        let likedCount = auth.isAuthenticated ? library.likedTracks.count : auth.userLikedTracks.count
                         ThreadsRow(
                             icon: "arrow.triangle.2.circlepath",
                             iconColor: ScandiumTheme.spotifyGreen,
                             title: settings.loc("Đồng bộ thư viện tài khoản", "Sync Account Library"),
-                            subtitle: "\(auth.userLikedTracks.count) \(settings.loc("bài hát", "tracks")) • \(auth.userPlaylists.count) playlist",
+                            subtitle: "\(likedCount) \(settings.loc("bài hát", "tracks")) • \(auth.userPlaylists.count) playlist",
                             showDivider: false
                         )
                     }
@@ -438,7 +428,10 @@ struct ProfileView: View {
                 .buttonStyle(PlainButtonStyle())
 
                 // Manual Input
-                Button(action: { showManualIDModal = true }) {
+                Button(action: {
+                    manualClientIDError = nil
+                    activeSheet = .manualClientID
+                }) {
                     ThreadsRow(
                         icon: "keyboard",
                         title: settings.loc("Cấu hình Client ID thủ công", "Manual Client ID Config"),
@@ -448,7 +441,7 @@ struct ProfileView: View {
                 .buttonStyle(PlainButtonStyle())
 
                 // 4-Step Guide
-                Button(action: { showGuideSheet = true }) {
+                Button(action: { activeSheet = .clientIDGuide }) {
                     ThreadsRow(
                         icon: "questionmark.circle",
                         title: settings.loc("Hướng dẫn lấy Client ID thủ công", "Manual Client ID Guide"),
@@ -558,20 +551,29 @@ struct ProfileView: View {
         VStack(alignment: .leading, spacing: 6) {
             sectionHeader(title: settings.loc("Chất lượng âm thanh", "Audio Quality"))
 
-            VStack(spacing: 0) {
-                ThreadsRow(
-                    icon: "waveform",
-                    title: settings.loc("Chất lượng âm thanh", "Audio Quality"),
-                    subtitle: settings.loc("128 kbps MP3 / 256 kbps AAC khi có sẵn", "128 kbps MP3 / 256 kbps AAC when available"),
-                    showDivider: false
-                ) {
-                    Text(settings.loc("Tự động (Cao)", "Auto (High)"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(ScandiumTheme.spotifyGreen)
+            Button(action: { activeSheet = .settings }) {
+                VStack(spacing: 0) {
+                    ThreadsRow(
+                        icon: "waveform",
+                        title: settings.loc("Chất lượng âm thanh", "Audio Quality"),
+                        subtitle: settings.loc("128 kbps MP3 / 256 kbps AAC khi có sẵn", "128 kbps MP3 / 256 kbps AAC when available"),
+                        showDivider: false
+                    ) {
+                        HStack(spacing: 6) {
+                            Text(settings.audioQuality.title(language: settings.language))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(ScandiumTheme.spotifyGreen)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(ScandiumTheme.subtext.opacity(0.6))
+                        }
+                    }
                 }
+                .background(ScandiumTheme.surfaceDark)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .background(ScandiumTheme.surfaceDark)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .buttonStyle(PlainButtonStyle())
         }
     }
 
@@ -597,7 +599,7 @@ struct ProfileView: View {
                     title: settings.loc("Phiên bản", "Version"),
                     showDivider: true
                 ) {
-                    Text("1.5.0")
+                    Text(AppSettings.appVersion)
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundColor(ScandiumTheme.spotifyGreen)
                 }
@@ -731,7 +733,7 @@ struct ProfileView: View {
                     Button(action: {
                         let input = manualAuthInput.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !input.isEmpty else { return }
-                        showManualAuthModal = false
+                        activeSheet = nil
 
                         Task {
                             if input.contains("soundcloud.com") {
@@ -747,12 +749,12 @@ struct ProfileView: View {
                             .foregroundColor(.black)
                             .frame(maxWidth: .infinity)
                             .frame(height: 44)
-                            .background(Color.white)
+                            .background(ScandiumTheme.spotifyGreen)
                             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
 
                     Button(action: {
-                        showOAuthGuideSheet = true
+                        showOAuthGuideInManualAuth = true
                     }) {
                         HStack(spacing: 8) {
                             Image(systemName: "questionmark.circle")
@@ -772,12 +774,16 @@ struct ProfileView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(settings.loc("Đóng", "Close")) {
-                        showManualAuthModal = false
+                        activeSheet = nil
                     }
                     .foregroundColor(ScandiumTheme.textPrimary)
                 }
             }
+            .sheet(isPresented: $showOAuthGuideInManualAuth) {
+                OAuthTokenGuideSheet()
+            }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .preferredColorScheme(settings.themeMode.colorScheme)
     }
 
@@ -803,11 +809,25 @@ struct ProfileView: View {
                         .background(ScandiumTheme.surfaceElevated)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
+                    if let err = manualClientIDError {
+                        Text(err)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.orange)
+                            .lineLimit(nil)
+                    }
+
                     HStack(spacing: 12) {
                         Button(action: {
-                            scraper.setManualClientID(manualClientIDInput)
-                            showManualIDModal = false
-                            showToast(settings.loc("Đã lưu Client ID thủ công!", "Manual Client ID saved!"))
+                            if scraper.setManualClientID(manualClientIDInput) {
+                                manualClientIDError = nil
+                                activeSheet = nil
+                                showToast(settings.loc("Đã lưu Client ID thủ công!", "Manual Client ID saved!"))
+                            } else {
+                                manualClientIDError = scraper.lastError ?? settings.loc(
+                                    "Client ID không hợp lệ (cần đúng 32 ký tự chữ và số).",
+                                    "Invalid Client ID (must be exactly 32 alphanumeric characters)."
+                                )
+                            }
                         }) {
                             Text(settings.loc("Lưu Client ID", "Save Client ID"))
                                 .font(.system(size: 15, weight: .semibold))
@@ -822,7 +842,8 @@ struct ProfileView: View {
                             Button(action: {
                                 scraper.setManualClientID(nil)
                                 manualClientIDInput = ""
-                                showManualIDModal = false
+                                manualClientIDError = nil
+                                activeSheet = nil
                                 showToast(settings.loc("Đã khôi phục Client ID tự động", "Auto Client ID restored"))
                             }) {
                                 Text(settings.loc("Khôi phục", "Reset"))
@@ -845,12 +866,14 @@ struct ProfileView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(settings.loc("Đóng", "Close")) {
-                        showManualIDModal = false
+                        manualClientIDError = nil
+                        activeSheet = nil
                     }
                     .foregroundColor(ScandiumTheme.textPrimary)
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .preferredColorScheme(settings.themeMode.colorScheme)
     }
 }
@@ -923,6 +946,7 @@ struct ClientIDGuideSheet: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .preferredColorScheme(settings.themeMode.colorScheme)
     }
 

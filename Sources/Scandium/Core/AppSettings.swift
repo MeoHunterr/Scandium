@@ -197,7 +197,13 @@ public enum SleepTimerOption: Int, CaseIterable, Identifiable {
 public final class AppSettings: ObservableObject {
     public static let shared = AppSettings()
 
+    public static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.5.1"
+    }
+
     // MARK: - Published Properties
+
+    @Published public var systemColorScheme: ColorScheme = .dark
 
     @Published public var themeMode: AppThemeMode {
         didSet {
@@ -232,7 +238,7 @@ public final class AppSettings: ObservableObject {
     @Published public var keepScreenAwake: Bool {
         didSet {
             UserDefaults.standard.set(keepScreenAwake, forKey: "scandium_keep_screen_awake")
-            UIApplication.shared.isIdleTimerDisabled = keepScreenAwake
+            Self.setIdleTimerDisabled(keepScreenAwake)
         }
     }
 
@@ -291,7 +297,7 @@ public final class AppSettings: ObservableObject {
         let awake = UserDefaults.standard.bool(forKey: "scandium_keep_screen_awake")
         self.keepScreenAwake = awake
         if awake {
-            UIApplication.shared.isIdleTimerDisabled = true
+            Self.setIdleTimerDisabled(true)
         }
 
         self.pauseOnHeadphoneDisconnect = UserDefaults.standard.object(forKey: "scandium_pause_on_headphone_disconnect") as? Bool ?? true
@@ -359,6 +365,16 @@ public final class AppSettings: ObservableObject {
 
     // MARK: - Dark Mode Detection
 
+    private static func setIdleTimerDisabled(_ disabled: Bool) {
+        if Thread.isMainThread {
+            UIApplication.shared.isIdleTimerDisabled = disabled
+        } else {
+            DispatchQueue.main.async {
+                UIApplication.shared.isIdleTimerDisabled = disabled
+            }
+        }
+    }
+
     public var isDark: Bool {
         switch themeMode {
         case .dark:
@@ -366,11 +382,7 @@ public final class AppSettings: ObservableObject {
         case .light:
             return false
         case .system:
-            if let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
-               let keyWindow = scene.windows.first(where: { $0.isKeyWindow }) {
-                return keyWindow.traitCollection.userInterfaceStyle != .light
-            }
-            return UITraitCollection.current.userInterfaceStyle != .light
+            return systemColorScheme != .light
         }
     }
 

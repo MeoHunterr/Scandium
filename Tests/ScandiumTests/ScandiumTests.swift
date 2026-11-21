@@ -649,4 +649,81 @@ final class ScandiumTests: XCTestCase {
         XCTAssertTrue(scraper.setManualClientID(nil))
         XCTAssertNil(scraper.manualClientID)
     }
+
+    func testTrackFormatDurationEdgeCases() {
+        XCTAssertEqual(Track.formatDuration(.nan), "0:00")
+        XCTAssertEqual(Track.formatDuration(.infinity), "0:00")
+        XCTAssertEqual(Track.formatDuration(-.infinity), "0:00")
+        XCTAssertEqual(Track.formatDuration(-5), "0:00")
+    }
+
+    func testPlaylistDecodesStubTrackIDsAndIsAlbum() throws {
+        let json = """
+        {
+            "id": 5001,
+            "title": "Album With Stubs",
+            "is_album": true,
+            "track_count": 3,
+            "tracks": [
+                {"id": 9991},
+                {"id": 9992, "monetization_model": "NOT_APPLICABLE"},
+                {
+                    "id": 9993,
+                    "title": "Full Track",
+                    "duration": 120000
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+
+        let playlist = try JSONDecoder().decode(SoundCloudPlaylist.self, from: json)
+        XCTAssertEqual(playlist.tracks?.count, 1)
+        XCTAssertEqual(playlist.trackIDs, [9991, 9992, 9993])
+        XCTAssertEqual(playlist.isAlbum, true)
+        XCTAssertTrue(playlist.isAlbumPlaylist)
+    }
+
+    func testIsSoundCloudAPIHostValidation() {
+        XCTAssertTrue(SoundCloudAPI.isSoundCloudAPIHost("https://api-v2.soundcloud.com/me/likes/tracks?limit=50"))
+        XCTAssertTrue(SoundCloudAPI.isSoundCloudAPIHost("https://soundcloud.com/resolve"))
+        XCTAssertFalse(SoundCloudAPI.isSoundCloudAPIHost("http://api-v2.soundcloud.com/me"))
+        XCTAssertFalse(SoundCloudAPI.isSoundCloudAPIHost("https://evil.com/soundcloud.com"))
+        XCTAssertFalse(SoundCloudAPI.isSoundCloudAPIHost("https://evilsoundcloud.com/me"))
+    }
+
+    func testLibraryManagerLikeAndUnlikePreservesOrder() {
+        let manager = LibraryManager.shared
+        manager.clearAllData()
+
+        let t1 = makeDummyTrack(id: 6001, title: "First")
+        let t2 = makeDummyTrack(id: 6002, title: "Second")
+        let t3 = makeDummyTrack(id: 6003, title: "Third")
+
+        manager.like(track: t1)
+        manager.like(track: t2)
+        manager.like(track: t3)
+        XCTAssertEqual(manager.likedTracks.map(\.id), [6003, 6002, 6001])
+
+        manager.unlike(track: t2)
+        XCTAssertEqual(manager.likedTracks.map(\.id), [6003, 6001])
+        XCTAssertTrue(manager.isLiked(track: t1))
+        XCTAssertFalse(manager.isLiked(track: t2))
+        XCTAssertTrue(manager.isLiked(track: t3))
+
+        manager.clearAllData()
+    }
+
+    @MainActor
+    func testAudioPlayerEnginePlaybackRateAndSeekGuard() {
+        let scraper = ClientIDScraper()
+        let api = SoundCloudAPI(scraper: scraper)
+        let player = AudioPlayerEngine(api: api)
+
+        player.setPlaybackRate(1.5)
+        XCTAssertEqual(player.playbackRate, 1.5)
+
+        player.seek(to: .nan)
+        player.seek(to: .infinity)
+        XCTAssertEqual(player.currentTime, 0)
+    }
 }

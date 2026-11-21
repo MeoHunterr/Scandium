@@ -9,9 +9,10 @@ struct SettingsSheetView: View {
     @Environment(\.presentationMode) var presentationMode
 
     @State private var showClearAllCacheAlert: Bool = false
-    @State private var showClearImageAlert: Bool = false
-    @State private var showClearAudioAlert: Bool = false
     @State private var toastMessage: String?
+
+    @MainActor
+    private static var iconPreviewCache: [AppIconOption: UIImage] = [:]
 
     init() {}
 
@@ -58,7 +59,6 @@ struct SettingsSheetView: View {
                     message: Text(settings.loc("Giải phóng ảnh bìa và file âm thanh tạm thời. Danh sách bài hát của bạn sẽ được giữ nguyên.", "Frees cached artwork and temp audio. Your library is kept safe.")),
                     primaryButton: .destructive(Text(settings.loc("Dọn sạch ngay", "Clear Now"))) {
                         storage.clearCache()
-                        ImageCacheStore.shared.clear()
                         showToast(settings.loc("Đã dọn sạch toàn bộ cache tạm!", "All temporary cache cleared!"))
                     },
                     secondaryButton: .cancel(Text(settings.loc("Hủy", "Cancel")))
@@ -68,6 +68,7 @@ struct SettingsSheetView: View {
                 toastOverlay
             )
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .preferredColorScheme(settings.themeMode.colorScheme)
     }
 
@@ -242,14 +243,26 @@ struct SettingsSheetView: View {
         }
     }
 
+    @MainActor
+    private static func cachedIconPreviewImage(for option: AppIconOption) -> UIImage? {
+        if let cached = iconPreviewCache[option] {
+            return cached
+        }
+        if let path = Bundle.main.path(forResource: option.previewImageName + "@2x", ofType: "png") ??
+                      Bundle.main.path(forResource: option.previewImageName + "60x60@2x", ofType: "png") ??
+                      Bundle.main.path(forResource: option.previewImageName, ofType: "png") ??
+                      Bundle.main.path(forResource: option.rawValue, ofType: "png") ??
+                      (option == .default ? Bundle.main.path(forResource: "icon", ofType: "png") : nil),
+           let uiImage = UIImage(contentsOfFile: path) {
+            iconPreviewCache[option] = uiImage
+            return uiImage
+        }
+        return nil
+    }
+
     private func iconThumbnail(for option: AppIconOption) -> some View {
         Group {
-            if let path = Bundle.main.path(forResource: option.previewImageName + "@2x", ofType: "png") ??
-                          Bundle.main.path(forResource: option.previewImageName + "60x60@2x", ofType: "png") ??
-                          Bundle.main.path(forResource: option.previewImageName, ofType: "png") ??
-                          Bundle.main.path(forResource: option.rawValue, ofType: "png") ??
-                          (option == .default ? Bundle.main.path(forResource: "icon", ofType: "png") : nil),
-               let uiImage = UIImage(contentsOfFile: path) {
+            if let uiImage = Self.cachedIconPreviewImage(for: option) {
                 Image(uiImage: uiImage)
                     .resizable()
                     .scaledToFit()
@@ -444,7 +457,7 @@ struct SettingsSheetView: View {
                         Text(settings.loc("Giữ màn hình luôn sáng", "Keep Screen Awake"))
                             .font(.system(size: 15, weight: .medium))
                             .foregroundColor(ScandiumTheme.textPrimary)
-                        Text(settings.loc("Không khóa màn hình khi đang ở màn hình Full Player", "Prevent auto-lock during full player display"))
+                        Text(settings.loc("Không tự động khóa màn hình khi ứng dụng đang mở", "Prevent auto-lock while the app is open"))
                             .font(.system(size: 12))
                             .foregroundColor(ScandiumTheme.subtext)
                     }
@@ -643,13 +656,12 @@ struct SettingsSheetView: View {
 
                 HairlineDivider(leadingPadding: 16)
 
-                // Version 1.4.2
                 HStack {
                     Text(settings.loc("Phiên bản", "Version"))
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(ScandiumTheme.textPrimary)
                     Spacer()
-                    Text("1.4.2")
+                    Text(AppSettings.appVersion)
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundColor(ScandiumTheme.spotifyGreen)
                 }

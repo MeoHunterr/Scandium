@@ -52,6 +52,7 @@ final class AudioPlayerEngine: ObservableObject {
     private var timeObserver: Any?
     private var sleepTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
+    private var sessionCancellables = Set<AnyCancellable>()
     private var artworkImage: UIImage?
     private var currentLoadTask: Task<Void, Never>?
     private var currentArtworkTask: Task<Void, Never>?
@@ -90,6 +91,7 @@ final class AudioPlayerEngine: ObservableObject {
             timeObserver = nil
         }
         cancellables.removeAll()
+        sessionCancellables.removeAll()
         player.pause()
         player.replaceCurrentItem(with: nil)
     }
@@ -103,8 +105,25 @@ final class AudioPlayerEngine: ObservableObject {
         guard !isSetup else { return }
         isSetup = true
         configureAudioSession()
+        setupAudioSessionObservers()
         setupPersistentTimeObserver()
         setupRemoteCommandCenter()
+    }
+
+    private func setupAudioSessionObservers() {
+        NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                self?.handleAudioInterruption(notification)
+            }
+            .store(in: &sessionCancellables)
+
+        NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] notification in
+                self?.handleAudioRouteChange(notification)
+            }
+            .store(in: &sessionCancellables)
     }
 
     // MARK: - Audio Session Configuration
@@ -139,25 +158,28 @@ final class AudioPlayerEngine: ObservableObject {
 
     /// Plays a track by resolving its stream URL and replacing the player's current item.
     func play(track: Track) {
+        play(track: track, atQueueIndex: nil)
+    }
+
+    private func play(track: Track, atQueueIndex explicitIndex: Int?) {
         setupIfNeeded()
         if !isPerformingAutoSkip {
             consecutiveAutoSkipCount = 0
         }
 
-        // 1. Cancel any active loading/stream resolution tasks
         currentLoadTask?.cancel()
         currentLoadTask = nil
         currentArtworkTask?.cancel()
         currentArtworkTask = nil
 
-        // 2. Immediately stop current playback to avoid race conditions or old audio persisting
         player.pause()
         player.replaceCurrentItem(with: nil)
         cancellables.removeAll()
         playerItem = nil
 
-        // 3. Keep queue and currentIndex synchronized
-        if let idx = queue.firstIndex(where: { $0.id == track.id }) {
+        if let idx = explicitIndex, idx >= 0, idx < queue.count {
+            currentIndex = idx
+        } else if let idx = queue.firstIndex(where: { $0.id == track.id }) {
             currentIndex = idx
         } else {
             queue = [track]
@@ -198,7 +220,7 @@ final class AudioPlayerEngine: ObservableObject {
     func play(at index: Int) {
         guard index >= 0, index < queue.count else { return }
         currentIndex = index
-        play(track: queue[index])
+        play(track: queue[index], atQueueIndex: index)
     }
 
     /// Sets the queue and starts playing from the first track (or a specified index).
@@ -206,7 +228,7 @@ final class AudioPlayerEngine: ObservableObject {
         queue = tracks
         currentIndex = max(0, min(index, tracks.count - 1))
         if !tracks.isEmpty {
-            play(track: tracks[currentIndex])
+            play(track: tracks[currentIndex], atQueueIndex: currentIndex)
         }
     }
 
@@ -280,20 +302,6 @@ final class AudioPlayerEngine: ObservableObject {
                 self?.handlePlaybackFailed(notification)
             }
             .store(in: &cancellables)
-
-        NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
-                self?.handleAudioInterruption(notification)
-            }
-            .store(in: &cancellables)
-
-        NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] notification in
-                self?.handleAudioRouteChange(notification)
-            }
-            .store(in: &cancellables)
     }
 
     // MARK: - Playback Controls
@@ -335,6 +343,8 @@ final class AudioPlayerEngine: ObservableObject {
                 play(at: currentIndex)
             }
         case .loading:
+            currentLoadTask?.cancel()
+            currentLoadTask = nil
             pause()
         }
     }
@@ -363,11 +373,13 @@ final class AudioPlayerEngine: ObservableObject {
 
     /// Seeks to a specific time in seconds.
     func seek(to time: TimeInterval) {
-        let cmTime = CMTime(seconds: time, preferredTimescale: 600)
+        guard time.isFinite else { return }
+        let clamped = max(0, duration > 0 ? min(time, duration) : time)
+        let cmTime = CMTime(seconds: clamped, preferredTimescale: 600)
         player.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
             if finished {
                 DispatchQueue.main.async {
-                    self?.currentTime = time
+                    self?.currentTime = clamped
                     self?.updateNowPlayingElapsedTime()
                 }
             }
@@ -408,17 +420,17 @@ final class AudioPlayerEngine: ObservableObject {
                 randomIndex = (randomIndex + 1) % queue.count
             }
             currentIndex = randomIndex
-            play(track: queue[randomIndex])
+            play(track: queue[randomIndex], atQueueIndex: randomIndex)
             return
         }
 
         let nextIndex = currentIndex + 1
         if nextIndex < queue.count {
             currentIndex = nextIndex
-            play(track: queue[nextIndex])
+            play(track: queue[nextIndex], atQueueIndex: nextIndex)
         } else if isRepeatEnabled && !queue.isEmpty {
             currentIndex = 0
-            play(track: queue[0])
+            play(track: queue[0], atQueueIndex: 0)
         } else {
             // Reached the end of queue or single track: fetch related / recommended tracks
             guard let current = currentTrack ?? queue.last else { return }
@@ -470,15 +482,16 @@ final class AudioPlayerEngine: ObservableObject {
                         let playIndex = self.currentIndex + 1
                         if playIndex < self.queue.count {
                             self.currentIndex = playIndex
-                            self.play(track: self.queue[playIndex])
+                            self.play(track: self.queue[playIndex], atQueueIndex: playIndex)
                         }
                     } else if self.queue.count > 1 {
                         // Loop back to start of queue
                         self.currentIndex = 0
-                        self.play(track: self.queue[0])
+                        self.play(track: self.queue[0], atQueueIndex: 0)
                     } else {
                         // Replay current track from start
-                        self.play(track: current)
+                        let safeIndex = self.currentIndex < self.queue.count ? self.currentIndex : nil
+                        self.play(track: current, atQueueIndex: safeIndex)
                     }
                 }
             }
@@ -497,10 +510,10 @@ final class AudioPlayerEngine: ObservableObject {
         let prevIndex = currentIndex - 1
         if prevIndex >= 0 {
             currentIndex = prevIndex
-            play(track: queue[prevIndex])
+            play(track: queue[prevIndex], atQueueIndex: prevIndex)
         } else {
             currentIndex = queue.count - 1
-            play(track: queue[currentIndex])
+            play(track: queue[currentIndex], atQueueIndex: currentIndex)
         }
     }
 
@@ -569,7 +582,7 @@ final class AudioPlayerEngine: ObservableObject {
             return
         }
 
-        if currentIndex + 1 < queue.count || isShuffleEnabled || AppSettings.shared.autoPlayRelated {
+        if currentIndex + 1 < queue.count || isRepeatEnabled || isShuffleEnabled || AppSettings.shared.autoPlayRelated {
             nextTrack()
         } else {
             playbackState = .paused
@@ -693,9 +706,9 @@ final class AudioPlayerEngine: ObservableObject {
 
         info[MPMediaItemPropertyTitle] = track.title
         info[MPMediaItemPropertyArtist] = track.user?.username ?? "Unknown Artist"
-        info[MPMediaItemPropertyPlaybackDuration] = track.durationInSeconds
+        info[MPMediaItemPropertyPlaybackDuration] = duration > 0 ? duration : track.durationInSeconds
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-        info[MPNowPlayingInfoPropertyPlaybackRate] = 1.0
+        info[MPNowPlayingInfoPropertyPlaybackRate] = playbackState.isPlaying ? Double(playbackRate) : 0.0
 
         if let albumTitle = track.publisherMetadata?.albumTitle {
             info[MPMediaItemPropertyAlbumTitle] = albumTitle
@@ -711,8 +724,11 @@ final class AudioPlayerEngine: ObservableObject {
 
     private func updateNowPlayingElapsedTime() {
         guard var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
+        if duration > 0 {
+            info[MPMediaItemPropertyPlaybackDuration] = duration
+        }
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = currentTime
-        info[MPNowPlayingInfoPropertyPlaybackRate] = playbackState.isPlaying ? 1.0 : 0.0
+        info[MPNowPlayingInfoPropertyPlaybackRate] = playbackState.isPlaying ? Double(playbackRate) : 0.0
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
@@ -727,19 +743,30 @@ final class AudioPlayerEngine: ObservableObject {
 
         currentArtworkTask = Task { [weak self] in
             guard let self = self else { return }
-            do {
-                let (data, _) = try await URLSession.shared.data(from: artworkURL)
-                if Task.isCancelled { return }
-                guard let image = UIImage(data: data) else { return }
-                await MainActor.run {
-                    guard !Task.isCancelled else { return }
-                    self.artworkImage = image
-                    if self.currentTrack?.id == track.id {
-                        self.updateNowPlayingInfo(track: track)
+            var resolvedImage = await ImageCacheStore.shared.get(for: artworkURL)
+            if Task.isCancelled { return }
+
+            if resolvedImage == nil {
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: artworkURL)
+                    if Task.isCancelled { return }
+                    if let downloaded = UIImage(data: data) {
+                        ImageCacheStore.shared.set(downloaded, for: artworkURL)
+                        resolvedImage = downloaded
                     }
+                } catch {
+                    print("[Scandium] Failed to fetch artwork for Now Playing: \(error.localizedDescription)")
+                    return
                 }
-            } catch {
-                print("[Scandium] Failed to fetch artwork for Now Playing: \(error.localizedDescription)")
+            }
+
+            guard !Task.isCancelled, let image = resolvedImage else { return }
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
+                self.artworkImage = image
+                if self.currentTrack?.id == track.id {
+                    self.updateNowPlayingInfo(track: track)
+                }
             }
         }
     }

@@ -19,11 +19,6 @@ final class SoundCloudAPI: ObservableObject {
     private let scraper: ClientIDScraper
     private let session: URLSession
 
-    // MARK: - Published State
-
-    @Published private(set) var isSearching: Bool = false
-    @Published private(set) var lastError: String?
-
     // MARK: - Init
 
     init(scraper: ClientIDScraper, session: URLSession = .shared) {
@@ -102,15 +97,72 @@ final class SoundCloudAPI: ObservableObject {
     // MARK: - Resolve Track by ID
 
     /// Fetches a single track by its numeric ID.
-    func getTrack(id: Int) async throws -> Track {
+    func getTrack(id: Int, oauthToken: String? = nil) async throws -> Track {
         let clientID = try await scraper.getClientID()
         let urlString = "\(Self.baseURL)/tracks/\(id)?client_id=\(clientID)"
+        var headers: [String: String]? = nil
+        if let token = oauthToken, !token.isEmpty {
+            headers = ["Authorization": "OAuth \(token)"]
+        }
 
-        return try await performRequest(
-            urlString: urlString,
-            decodeAs: Track.self,
-            retryCount: 0
-        )
+        do {
+            return try await performRequest(
+                urlString: urlString,
+                decodeAs: Track.self,
+                headers: headers,
+                retryCount: 0
+            )
+        } catch APIError.oauthUnauthorized where headers != nil {
+            return try await performRequest(
+                urlString: urlString,
+                decodeAs: Track.self,
+                headers: nil,
+                retryCount: 0
+            )
+        }
+    }
+
+    /// Hydrates a list of track IDs in batches of 50 while preserving original requested order.
+    func getTracks(ids: [Int], oauthToken: String? = nil) async throws -> [Track] {
+        var uniqueIDs: [Int] = []
+        var seen = Set<Int>()
+        for id in ids where seen.insert(id).inserted {
+            uniqueIDs.append(id)
+        }
+        guard !uniqueIDs.isEmpty else { return [] }
+
+        var headers: [String: String]? = nil
+        if let token = oauthToken, !token.isEmpty {
+            headers = ["Authorization": "OAuth \(token)"]
+        }
+
+        var fetchedByID: [Int: Track] = [:]
+        let batchSize = 50
+        var start = 0
+        while start < uniqueIDs.count {
+            try Task.checkCancellation()
+            let end = min(start + batchSize, uniqueIDs.count)
+            let chunk = uniqueIDs[start..<end]
+            let idsParam = chunk.map(String.init).joined(separator: ",")
+            let clientID = try await scraper.getClientID()
+            let urlString = "\(Self.baseURL)/tracks?ids=\(idsParam)&client_id=\(clientID)"
+
+            let data = try await performRawRequest(urlString: urlString, headers: headers)
+            let chunkTracks: [Track]
+            if let arr = try? JSONDecoder().decode([Track].self, from: data) {
+                chunkTracks = arr
+            } else if let wrapped = try? JSONDecoder().decode(SearchResponse.self, from: data) {
+                chunkTracks = wrapped.collection
+            } else {
+                chunkTracks = []
+            }
+            for t in chunkTracks {
+                fetchedByID[t.id] = t
+            }
+            start = end
+        }
+
+        return uniqueIDs.compactMap { fetchedByID[$0] }
     }
 
     // MARK: - User & Authentication API
@@ -229,6 +281,17 @@ final class SoundCloudAPI: ObservableObject {
         return ([], nil)
     }
 
+    /// Validates that a URL uses HTTPS and points to soundcloud.com or a subdomain before attaching OAuth headers.
+    static func isSoundCloudAPIHost(_ urlString: String) -> Bool {
+        guard let components = URLComponents(string: urlString),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "https",
+              let host = components.host?.lowercased() else {
+            return false
+        }
+        return host == "soundcloud.com" || host.hasSuffix(".soundcloud.com")
+    }
+
     /// Fetches a single page of liked tracks from urlString
     func fetchLikesPage(
         urlString: String,
@@ -242,7 +305,7 @@ final class SoundCloudAPI: ObservableObject {
         }
 
         var headers: [String: String]? = nil
-        if let token = oauthToken, !token.isEmpty {
+        if let token = oauthToken, !token.isEmpty, Self.isSoundCloudAPIHost(finalURL) {
             headers = ["Authorization": "OAuth \(token)"]
         }
 
@@ -406,7 +469,7 @@ final class SoundCloudAPI: ObservableObject {
         }
 
         var headers: [String: String]? = nil
-        if let token = oauthToken, !token.isEmpty {
+        if let token = oauthToken, !token.isEmpty, Self.isSoundCloudAPIHost(finalURL) {
             headers = ["Authorization": "OAuth \(token)"]
         }
 
@@ -558,6 +621,47 @@ final class SoundCloudAPI: ObservableObject {
             decodeAs: SoundCloudPlaylist.self,
             headers: headers,
             retryCount: 0
+        )
+    }
+
+    /// Fetches a playlist and hydrates any stub track IDs beyond the initial tracks returned by SoundCloud.
+    func getPlaylistWithAllTracks(id: Int, oauthToken: String? = nil) async throws -> SoundCloudPlaylist {
+        let playlist = try await getPlaylist(id: id, oauthToken: oauthToken)
+        var existingByID: [Int: Track] = [:]
+        for t in playlist.tracks ?? [] {
+            existingByID[t.id] = t
+        }
+
+        let orderedIDs = playlist.trackIDs ?? playlist.tracks?.map { $0.id } ?? []
+        let missingIDs = orderedIDs.filter { existingByID[$0] == nil }
+
+        if !missingIDs.isEmpty {
+            if let hydrated = try? await getTracks(ids: missingIDs, oauthToken: oauthToken) {
+                for t in hydrated {
+                    existingByID[t.id] = t
+                }
+            }
+        }
+
+        let allTracks: [Track]
+        if !orderedIDs.isEmpty {
+            allTracks = orderedIDs.compactMap { existingByID[$0] }
+        } else {
+            allTracks = playlist.tracks ?? []
+        }
+
+        return SoundCloudPlaylist(
+            id: playlist.id,
+            title: playlist.title,
+            description: playlist.description,
+            duration: playlist.duration,
+            trackCount: playlist.trackCount,
+            artworkURL: playlist.artworkURL,
+            permalinkURL: playlist.permalinkURL,
+            tracks: allTracks.isEmpty ? playlist.tracks : allTracks,
+            trackIDs: orderedIDs.isEmpty ? playlist.trackIDs : orderedIDs,
+            isAlbum: playlist.isAlbum,
+            user: playlist.user
         )
     }
 
@@ -778,15 +882,37 @@ final class SoundCloudAPI: ObservableObject {
             throw APIError.invalidResponse
         }
 
-        if (httpResponse.statusCode == 401 || httpResponse.statusCode == 403) && retryCount < Self.maxRetries {
-            try await scraper.refreshClientID()
-            let newClientID = try await scraper.getClientID()
-            let refreshedURLString = replaceClientID(in: urlString, with: newClientID)
-            return try await performRawRequest(
-                urlString: refreshedURLString,
-                headers: headers,
-                retryCount: retryCount + 1
-            )
+        if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+            let hasOAuthHeader = headers?.keys.contains(where: {
+                $0.caseInsensitiveCompare("Authorization") == .orderedSame
+            }) == true
+
+            if hasOAuthHeader {
+                if retryCount == 0 {
+                    if await isCurrentClientIDValid() {
+                        throw APIError.oauthUnauthorized
+                    }
+                    try await scraper.refreshClientID()
+                    let newClientID = try await scraper.getClientID()
+                    let refreshedURLString = replaceClientID(in: urlString, with: newClientID)
+                    return try await performRawRequest(
+                        urlString: refreshedURLString,
+                        headers: headers,
+                        retryCount: retryCount + 1
+                    )
+                } else {
+                    throw APIError.oauthUnauthorized
+                }
+            } else if retryCount < Self.maxRetries {
+                try await scraper.refreshClientID()
+                let newClientID = try await scraper.getClientID()
+                let refreshedURLString = replaceClientID(in: urlString, with: newClientID)
+                return try await performRawRequest(
+                    urlString: refreshedURLString,
+                    headers: headers,
+                    retryCount: retryCount + 1
+                )
+            }
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
@@ -796,13 +922,39 @@ final class SoundCloudAPI: ObservableObject {
         return data
     }
 
+    private func isCurrentClientIDValid() async -> Bool {
+        guard let clientID = scraper.currentClientID,
+              !clientID.isEmpty,
+              let url = URL(string: "\(Self.baseURL)/search/tracks?q=a&limit=1&client_id=\(clientID)") else {
+            return false
+        }
+        var request = URLRequest(url: url)
+        request.setValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 5
+
+        do {
+            let (_, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse {
+                return (200...299).contains(http.statusCode)
+            }
+        } catch {
+            return false
+        }
+        return false
+    }
+
     /// Resolves the direct stream URL for a track.
     /// Strictly filters out unsupported codecs (ogg/opus) on iOS 15.
     /// Prioritizes Progressive audio/mpeg -> HLS audio/mpeg -> HLS audio/mp4 (AAC).
     func resolveStreamURL(for track: Track) async throws -> URL {
+        let oauthToken = await MainActor.run { SoundCloudAuthManager.shared.oauthToken }
         var currentTrack = track
         if currentTrack.media?.transcodings.isEmpty ?? true {
-            if let full = try? await getTrack(id: track.id) {
+            if let full = try? await getTrack(id: track.id, oauthToken: oauthToken) {
                 currentTrack = full
             }
         }
@@ -831,7 +983,7 @@ final class SoundCloudAPI: ObservableObject {
 
         for transcoding in sorted {
             do {
-                let streamURL = try await fetchStreamURL(from: transcoding)
+                let streamURL = try await fetchStreamURL(from: transcoding, oauthToken: oauthToken)
                 return streamURL
             } catch {
                 lastError = error
@@ -928,16 +1080,50 @@ final class SoundCloudAPI: ObservableObject {
 
     /// Fetches the actual media URL from a transcoding endpoint.
     /// The transcoding URL returns JSON `{ "url": "https://cf-media.sndcdn.com/..." }`.
-    private func fetchStreamURL(from transcoding: Transcoding) async throws -> URL {
+    private func fetchStreamURL(from transcoding: Transcoding, oauthToken: String? = nil) async throws -> URL {
         let clientID = try await scraper.getClientID()
         let separator = transcoding.url.contains("?") ? "&" : "?"
         let urlString = "\(transcoding.url)\(separator)client_id=\(clientID)"
 
-        let response: StreamURLResponse = try await performRequest(
-            urlString: urlString,
-            decodeAs: StreamURLResponse.self,
-            retryCount: 0
-        )
+        let activeToken = (oauthToken?.isEmpty == false) ? oauthToken : nil
+        var headers: [String: String]? = nil
+        if let token = activeToken, Self.isSoundCloudAPIHost(urlString) {
+            headers = ["Authorization": "OAuth \(token)"]
+        }
+
+        let response: StreamURLResponse
+        do {
+            response = try await performRequest(
+                urlString: urlString,
+                decodeAs: StreamURLResponse.self,
+                headers: headers,
+                retryCount: 0
+            )
+        } catch {
+            if headers != nil {
+                let isAuthError: Bool
+                switch error {
+                case APIError.oauthUnauthorized:
+                    isAuthError = true
+                case APIError.httpError(let code) where code == 401 || code == 403:
+                    isAuthError = true
+                default:
+                    isAuthError = false
+                }
+                if isAuthError {
+                    response = try await performRequest(
+                        urlString: urlString,
+                        decodeAs: StreamURLResponse.self,
+                        headers: nil,
+                        retryCount: 0
+                    )
+                } else {
+                    throw error
+                }
+            } else {
+                throw error
+            }
+        }
 
         guard let streamURL = URL(string: response.url) else {
             throw APIError.invalidStreamURL(response.url)
@@ -1012,6 +1198,7 @@ enum APIError: LocalizedError {
     case noStreamURL
     case invalidStreamURL(String)
     case noWaveformURL
+    case oauthUnauthorized
 
     var errorDescription: String? {
         switch self {
@@ -1033,6 +1220,11 @@ enum APIError: LocalizedError {
             return "Invalid stream URL received: \(url)"
         case .noWaveformURL:
             return "This track has no waveform data URL."
+        case .oauthUnauthorized:
+            return AppSettings.shared.loc(
+                "Phiên đăng nhập SoundCloud đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại.",
+                "SoundCloud session expired or is invalid. Please sign in again."
+            )
         }
     }
 }

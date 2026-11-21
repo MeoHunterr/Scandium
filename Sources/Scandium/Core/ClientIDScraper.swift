@@ -61,6 +61,7 @@ final class ClientIDScraper: ObservableObject {
     private let session: URLSession
     private let taskLock = NSLock()
     private var refreshTask: Task<String, Error>?
+    private var refreshTaskGeneration: Int = 0
     private var consecutiveManualAuthFailures: Int = 0
     private var isManualTemporarilyBypassed: Bool = false
 
@@ -136,10 +137,13 @@ final class ClientIDScraper: ObservableObject {
         if let existing = refreshTask {
             return existing
         }
+        refreshTaskGeneration += 1
+        let taskGeneration = refreshTaskGeneration
         let task = Task<String, Error> { [weak self] in
             guard let self = self else {
                 throw ScraperError.deallocated
             }
+            defer { self.clearRefreshTask(matching: taskGeneration) }
             await MainActor.run {
                 self.isLoading = true
                 self.lastError = nil
@@ -170,10 +174,20 @@ final class ClientIDScraper: ObservableObject {
         return task
     }
 
-    private func clearRefreshTask() {
+    private func clearRefreshTask(matching generation: Int) {
         taskLock.lock()
         defer { taskLock.unlock() }
-        self.refreshTask = nil
+        if self.refreshTaskGeneration == generation {
+            self.refreshTask = nil
+        }
+    }
+
+    private func performOnMainSync(_ block: () -> Void) {
+        if Thread.isMainThread {
+            block()
+        } else {
+            DispatchQueue.main.sync(execute: block)
+        }
     }
 
     /// Forces a fresh scrape across all endpoints. Throws on failure (no hardcoded fallback IDs).
@@ -190,8 +204,6 @@ final class ClientIDScraper: ObservableObject {
         }
 
         let task = getOrStartRefreshTask()
-        defer { clearRefreshTask() }
-
         return try await task.value
     }
 
@@ -208,21 +220,25 @@ final class ClientIDScraper: ObservableObject {
             taskLock.unlock()
 
             UserDefaults.standard.removeObject(forKey: Self.manualOverrideKey)
-            if let cached = Self.loadCachedClientID() {
-                self.clientID = cached
-                self.status = .cached
-            } else {
-                self.clientID = nil
-                self.status = .noClientID
+            performOnMainSync {
+                if let cached = Self.loadCachedClientID() {
+                    self.clientID = cached
+                    self.status = .cached
+                } else {
+                    self.clientID = nil
+                    self.status = .noClientID
+                }
             }
             return true
         }
 
         guard Self.isValidClientIDFormat(trimmed) else {
-            self.lastError = AppSettings.shared.loc(
-                "Client ID không hợp lệ (cần đúng 32 ký tự chữ và số).",
-                "Invalid Client ID (must be exactly 32 alphanumeric characters)."
-            )
+            performOnMainSync {
+                self.lastError = AppSettings.shared.loc(
+                    "Client ID không hợp lệ (cần đúng 32 ký tự chữ và số).",
+                    "Invalid Client ID (must be exactly 32 alphanumeric characters)."
+                )
+            }
             return false
         }
 
@@ -232,9 +248,11 @@ final class ClientIDScraper: ObservableObject {
         taskLock.unlock()
 
         UserDefaults.standard.set(trimmed, forKey: Self.manualOverrideKey)
-        self.clientID = trimmed
-        self.status = .manual
-        self.lastError = nil
+        performOnMainSync {
+            self.clientID = trimmed
+            self.status = .manual
+            self.lastError = nil
+        }
         return true
     }
 
@@ -256,8 +274,10 @@ final class ClientIDScraper: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Self.cacheKey)
         UserDefaults.standard.removeObject(forKey: Self.cacheTimestampKey)
         if !isManualOverride {
-            self.clientID = nil
-            self.status = .ready
+            performOnMainSync {
+                self.clientID = nil
+                self.status = .ready
+            }
         }
     }
 
@@ -407,26 +427,6 @@ final class ClientIDScraper: ObservableObject {
         }
 
         return nil
-    }
-
-    /// Verifies if a client_id works by calling search API
-    private func verifyClientID(_ id: String) async -> Bool {
-        guard let url = URL(string: "https://api-v2.soundcloud.com/search/tracks?q=test&client_id=\(id)&limit=1") else {
-            return false
-        }
-        var request = URLRequest(url: url)
-        request.setValue(Self.desktopUserAgent, forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 5
-
-        do {
-            let (_, response) = try await session.data(for: request)
-            if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
-                return true
-            }
-        } catch {
-            return false
-        }
-        return false
     }
 
     // MARK: - Cache Helpers

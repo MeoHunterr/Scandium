@@ -232,24 +232,27 @@ struct AmbientCanvasBackground: View {
         }
     }
 
+    private static let sharedCIContext = CIContext(options: [.useSoftwareRenderer: false])
+
     // Uses CoreImage CIGaussianBlur — runs on background thread, GPU-accelerated
     private static func createBlurredImage(from source: UIImage) -> UIImage? {
         // Downsample to 48×48 before blurring for GPU efficiency
         let targetSize = CGSize(width: 48, height: 48)
-        UIGraphicsBeginImageContextWithOptions(targetSize, false, 1.0)
-        source.draw(in: CGRect(origin: .zero, size: targetSize))
-        let small = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        guard let smallImage = small,
-              let cgImage = smallImage.cgImage else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1.0
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+        let smallImage = renderer.image { _ in
+            source.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        guard let cgImage = smallImage.cgImage else { return nil }
 
         let ciImage = CIImage(cgImage: cgImage)
-        let context = CIContext(options: [.useSoftwareRenderer: false])
         guard let blurFilter = CIFilter(name: "CIGaussianBlur") else { return nil }
         blurFilter.setValue(ciImage, forKey: kCIInputImageKey)
         blurFilter.setValue(12.0, forKey: kCIInputRadiusKey)
         guard let outputImage = blurFilter.outputImage,
-              let cgOutput = context.createCGImage(outputImage, from: ciImage.extent) else { return nil }
+              let cgOutput = Self.sharedCIContext.createCGImage(outputImage, from: ciImage.extent) else { return nil }
         return UIImage(cgImage: cgOutput)
     }
 }
@@ -420,6 +423,11 @@ final class ImageCacheStore {
 
     private let memoryCache = NSCache<NSString, UIImage>()
     private let diskCacheDir: URL?
+    private let ioQueue = DispatchQueue(label: "com.scandium.imageCache.io", qos: .utility)
+    private var writesSinceLastEviction: Int = 0
+    private var lastEvictionDate: Date = .distantPast
+    private static let evictionWriteThreshold: Int = 25
+    private static let evictionMinInterval: TimeInterval = 60
 
     private init() {
         memoryCache.countLimit = 300
@@ -436,9 +444,15 @@ final class ImageCacheStore {
     }
 
     private func diskKey(for url: URL) -> String {
-        let raw = url.absoluteString
-        let hash = raw.utf8.reduce(5381) { ($0 << 5) &+ $0 &+ Int($1) }
-        return "img_\(abs(hash)).jpg"
+        let bytes = url.absoluteString.utf8
+        var djb2: UInt64 = 5381
+        var fnv: UInt64 = 14695981039346656037
+        for b in bytes {
+            djb2 = ((djb2 << 5) &+ djb2) &+ UInt64(b)
+            fnv ^= UInt64(b)
+            fnv = fnv &* 1099511628211
+        }
+        return String(format: "img_%016llx%016llx.jpg", djb2, fnv)
     }
 
     func getFromMemory(for url: URL) -> UIImage? {
@@ -465,6 +479,9 @@ final class ImageCacheStore {
         }
         if let (diskImg, cost) = loaded {
             memoryCache.setObject(diskImg, forKey: key, cost: cost)
+            ioQueue.async {
+                try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: fileURL.path)
+            }
             return diskImg
         }
         return nil
@@ -472,17 +489,26 @@ final class ImageCacheStore {
 
     func set(_ image: UIImage, for url: URL) {
         let key = url.absoluteString as NSString
-        let data = image.jpegData(compressionQuality: 0.85)
-        let cost = data?.count ?? 0
+        let cost = Int(image.size.width * image.scale * image.size.height * image.scale * 4)
         memoryCache.setObject(image, forKey: key, cost: cost)
 
-        if let data = data, let dir = diskCacheDir {
+        if let dir = diskCacheDir {
             let fileURL = dir.appendingPathComponent(diskKey(for: url))
-            DispatchQueue.global(qos: .utility).async {
-                try? data.write(to: fileURL, options: .atomic)
+            ioQueue.async { [weak self] in
+                guard let self = self else { return }
+                if let data = image.jpegData(compressionQuality: 0.85) {
+                    try? data.write(to: fileURL, options: .atomic)
+                    self.writesSinceLastEviction += 1
+                    let now = Date()
+                    if self.writesSinceLastEviction >= Self.evictionWriteThreshold ||
+                       now.timeIntervalSince(self.lastEvictionDate) >= Self.evictionMinInterval {
+                        self.writesSinceLastEviction = 0
+                        self.lastEvictionDate = now
+                        self._evictOnIOQueue(in: dir)
+                    }
+                }
             }
         }
-        evictIfNeeded()
     }
 
     // MARK: - LRU Disk Cache Eviction
@@ -492,46 +518,51 @@ final class ImageCacheStore {
 
     func evictIfNeeded() {
         guard let dir = diskCacheDir else { return }
-        DispatchQueue.global(qos: .background).async {
-            let fm = FileManager.default
-            guard let files = try? fm.contentsOfDirectory(
-                at: dir,
-                includingPropertiesForKeys: [.fileSizeKey, .contentAccessDateKey],
-                options: .skipsHiddenFiles
-            ) else { return }
+        ioQueue.async { [weak self] in
+            self?._evictOnIOQueue(in: dir)
+        }
+    }
 
-            // Calculate total size
-            var totalSize: Int64 = 0
-            var fileInfos: [(url: URL, size: Int64, accessDate: Date)] = []
-            for fileURL in files {
-                guard let attrs = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentAccessDateKey]),
-                      let size = attrs.fileSize,
-                      let accessDate = attrs.contentAccessDate else { continue }
-                let s = Int64(size)
-                totalSize += s
-                fileInfos.append((url: fileURL, size: s, accessDate: accessDate))
-            }
+    private func _evictOnIOQueue(in dir: URL) {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .contentAccessDateKey],
+            options: .skipsHiddenFiles
+        ) else { return }
 
-            guard totalSize > ImageCacheStore.maxDiskCacheBytes else { return }
+        // Calculate total size
+        var totalSize: Int64 = 0
+        var fileInfos: [(url: URL, size: Int64, recencyDate: Date)] = []
+        for fileURL in files {
+            guard let attrs = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .contentAccessDateKey]),
+                  let size = attrs.fileSize else { continue }
+            let recencyDate = attrs.contentModificationDate ?? attrs.contentAccessDate ?? Date.distantPast
+            let s = Int64(size)
+            totalSize += s
+            fileInfos.append((url: fileURL, size: s, recencyDate: recencyDate))
+        }
 
-            // Sort by access date ascending (oldest first = LRU eviction order)
-            fileInfos.sort { $0.accessDate < $1.accessDate }
+        guard totalSize > ImageCacheStore.maxDiskCacheBytes else { return }
 
-            // Evict until below 80% threshold
-            for info in fileInfos {
-                guard totalSize > ImageCacheStore.targetDiskCacheBytes else { break }
-                try? fm.removeItem(at: info.url)
-                totalSize -= info.size
-            }
+        fileInfos.sort { $0.recencyDate < $1.recencyDate }
+
+        for info in fileInfos {
+            guard totalSize > ImageCacheStore.targetDiskCacheBytes else { break }
+            try? fm.removeItem(at: info.url)
+            totalSize -= info.size
         }
     }
 
     func clear() {
         memoryCache.removeAllObjects()
-        if let dir = diskCacheDir,
-           let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
-            for f in files {
-                try? FileManager.default.removeItem(at: f)
+        guard let dir = diskCacheDir else { return }
+        ioQueue.async { [weak self] in
+            self?.writesSinceLastEviction = 0
+            if let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+                for f in files {
+                    try? FileManager.default.removeItem(at: f)
+                }
             }
         }
     }

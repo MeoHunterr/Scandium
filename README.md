@@ -33,6 +33,11 @@ Requires **Swift 6.4+** and **[xtool](https://xtool.sh)** configured with the iO
     python3 scripts/prebuild_audit.py
     ./scripts/build_ipa.sh
 
+`build_ipa.sh` requires `ldid` in `PATH` to pseudo-sign the bundle with `entitlements.plist` for TrollStore. If `ldid` is not installed and you want to compile an unsigned `.ipa` for local testing or external signing:
+
+    ./scripts/build_ipa.sh --allow-unsigned
+    # or: ALLOW_UNSIGNED=1 ./scripts/build_ipa.sh
+
 The packaged `Scandium.ipa` will be generated in the project root.
 
 ## Disclaimer

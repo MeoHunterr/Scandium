@@ -88,9 +88,9 @@ struct LibraryView: View {
 
             Spacer()
 
-            if auth.isAuthenticated {
+            if auth.isLoggedIn {
                 HStack(spacing: 6) {
-                    Image(systemName: "checkmark.seal.fill")
+                    Image(systemName: auth.isAuthenticated ? "checkmark.seal.fill" : "person.crop.circle")
                         .font(.system(size: 13))
                         .foregroundColor(ScandiumTheme.spotifyGreen)
                     Text(auth.currentUser?.username ?? settings.loc("Đã kết nối", "Connected"))
@@ -154,7 +154,7 @@ struct LibraryView: View {
             .padding(.bottom, 130)
         }
         .refreshable {
-            if auth.isAuthenticated {
+            if auth.isLoggedIn {
                 await auth.syncLibrary()
             }
         }
@@ -233,7 +233,7 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var playlistsSection: some View {
-        if !auth.isAuthenticated {
+        if !auth.isLoggedIn {
             emptyStateView(
                 icon: "music.note.list",
                 title: settings.loc("Chưa đồng bộ tài khoản", "Account Not Synchronized"),
@@ -258,7 +258,7 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var albumsSection: some View {
-        if !auth.isAuthenticated {
+        if !auth.isLoggedIn {
             emptyStateView(
                 icon: "opticaldisc",
                 title: settings.loc("Chưa đồng bộ tài khoản", "Account Not Synchronized"),
@@ -331,7 +331,7 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var followingsSection: some View {
-        if !auth.isAuthenticated {
+        if !auth.isLoggedIn {
             emptyStateView(
                 icon: "person.crop.circle.badge.plus",
                 title: settings.loc("Chưa đồng bộ tài khoản", "Account Not Synchronized"),
@@ -478,6 +478,7 @@ struct PlaylistDetailSheet: View {
 
     @State private var detailedPlaylist: SoundCloudPlaylist?
     @State private var isLoading: Bool = true
+    @State private var loadTask: Task<Void, Never>? = nil
 
     init(playlist: SoundCloudPlaylist) {
         self.playlist = playlist
@@ -569,15 +570,21 @@ struct PlaylistDetailSheet: View {
                                 .padding(.top, 30)
                         } else {
                             LazyVStack(spacing: 4) {
-                                ForEach(displayTracks) { track in
+                                ForEach(Array(displayTracks.enumerated()), id: \.offset) { idx, track in
                                     GlassTrackRow(
                                         track: track,
                                         isCurrentlyPlaying: player.currentTrack?.id == track.id,
                                         onTap: {
-                                            player.playQueue(displayTracks, startingAt: displayTracks.firstIndex(of: track) ?? 0)
+                                            player.playQueue(displayTracks, startingAt: idx)
                                         }
                                     )
                                 }
+                            }
+                            if isLoading {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: ScandiumTheme.spotifyGreen))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 16)
                             }
                         }
                     }
@@ -596,26 +603,40 @@ struct PlaylistDetailSheet: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .onAppear {
             loadTracks()
+        }
+        .onDisappear {
+            loadTask?.cancel()
+            loadTask = nil
         }
     }
 
     private func loadTracks() {
-        if playlist.tracks != nil && !(playlist.tracks?.isEmpty ?? true) {
+        let expectedCount = max(playlist.trackCount ?? 0, playlist.trackIDs?.count ?? 0)
+        let existingCount = playlist.tracks?.count ?? 0
+        if existingCount > 0 && (expectedCount == 0 || existingCount >= expectedCount) {
             isLoading = false
             return
         }
 
-        Task {
+        isLoading = true
+        loadTask?.cancel()
+        loadTask = Task {
             do {
-                let full = try await api.getPlaylist(id: playlist.id, oauthToken: SoundCloudAuthManager.shared.oauthToken)
+                let full = try await api.getPlaylistWithAllTracks(
+                    id: playlist.id,
+                    oauthToken: SoundCloudAuthManager.shared.oauthToken
+                )
                 await MainActor.run {
+                    guard !Task.isCancelled else { return }
                     self.detailedPlaylist = full
                     self.isLoading = false
                 }
             } catch {
                 await MainActor.run {
+                    guard !Task.isCancelled else { return }
                     self.isLoading = false
                 }
             }

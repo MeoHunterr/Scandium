@@ -64,7 +64,6 @@ struct MainContainerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
-        .ignoresSafeArea(.container, edges: .bottom)
         .preferredColorScheme(settings.themeMode.colorScheme)
         .fullScreenCover(isPresented: $showFullPlayer) {
             FullPlayerView()
@@ -125,7 +124,7 @@ struct MainContainerView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.top, 8)
-                        .padding(.bottom, 24) // Extra bottom padding for iPhone 11 Home indicator
+                        .padding(.bottom, 8)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -139,6 +138,7 @@ struct MainContainerView: View {
                 Rectangle()
                     .fill(ScandiumTheme.bgPrimary.opacity(0.85))
             }
+            .ignoresSafeArea(edges: .bottom)
         )
     }
 

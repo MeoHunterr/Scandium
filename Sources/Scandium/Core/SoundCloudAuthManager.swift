@@ -83,20 +83,47 @@ final class SoundCloudAuthManager: ObservableObject {
             }
         }
 
-        if let plData = UserDefaults.standard.data(forKey: playlistsKey),
-           let playlists = try? JSONDecoder().decode([SoundCloudPlaylist].self, from: plData) {
-            self.userPlaylists = playlists
-            self.userAlbums = playlists.filter { ($0.trackCount ?? 0) >= 5 || ($0.title.lowercased().contains("album") || $0.title.lowercased().contains("ep")) }
+        if self.isAuthenticated {
+            let sqlitePlaylists = LibraryManager.shared.userPlaylists
+            if !sqlitePlaylists.isEmpty {
+                self.userPlaylists = sqlitePlaylists
+                UserDefaults.standard.removeObject(forKey: playlistsKey)
+            } else if let plData = UserDefaults.standard.data(forKey: playlistsKey),
+                      let playlists = try? JSONDecoder().decode([SoundCloudPlaylist].self, from: plData) {
+                self.userPlaylists = playlists
+                LibraryManager.shared.syncUserPlaylists(playlists)
+                UserDefaults.standard.removeObject(forKey: playlistsKey)
+            }
+
+            let sqliteLikes = LibraryManager.shared.likedTracks
+            if !sqliteLikes.isEmpty {
+                self.userLikedTracks = sqliteLikes
+                UserDefaults.standard.removeObject(forKey: userLikesKey)
+            } else if let likesData = UserDefaults.standard.data(forKey: userLikesKey),
+                      let likes = try? JSONDecoder().decode([Track].self, from: likesData) {
+                self.userLikedTracks = likes
+                LibraryManager.shared.syncLikedTracks(likes)
+                UserDefaults.standard.removeObject(forKey: userLikesKey)
+            }
+        } else if self.isPublicProfile {
+            if let plData = UserDefaults.standard.data(forKey: playlistsKey),
+               let playlists = try? JSONDecoder().decode([SoundCloudPlaylist].self, from: plData) {
+                self.userPlaylists = playlists
+            }
+
+            if let likesData = UserDefaults.standard.data(forKey: userLikesKey),
+               let likes = try? JSONDecoder().decode([Track].self, from: likesData) {
+                self.userLikedTracks = likes
+            } else {
+                self.userLikedTracks = LibraryManager.shared.likedTracks
+            }
         }
+
+        self.userAlbums = self.userPlaylists.filter { $0.isAlbumPlaylist }
 
         if let folData = UserDefaults.standard.data(forKey: followingsKey),
            let followings = try? JSONDecoder().decode([SoundCloudUser].self, from: folData) {
             self.userFollowings = followings
-        }
-
-        if let likesData = UserDefaults.standard.data(forKey: userLikesKey),
-           let likes = try? JSONDecoder().decode([Track].self, from: likesData) {
-            self.userLikedTracks = likes
         }
     }
 
@@ -122,10 +149,20 @@ final class SoundCloudAuthManager: ObservableObject {
             UserDefaults.standard.set(folData, forKey: followingsKey)
         }
 
-        // Liked tracks and playlists are persisted in SQLite via LibraryManager;
-        // purge legacy heavy blobs from UserDefaults to keep persistence lightweight.
-        UserDefaults.standard.removeObject(forKey: playlistsKey)
-        UserDefaults.standard.removeObject(forKey: userLikesKey)
+        if isAuthenticated {
+            UserDefaults.standard.removeObject(forKey: playlistsKey)
+            UserDefaults.standard.removeObject(forKey: userLikesKey)
+        } else if isPublicProfile {
+            if let plData = try? JSONEncoder().encode(userPlaylists) {
+                UserDefaults.standard.set(plData, forKey: playlistsKey)
+            }
+            if let likesData = try? JSONEncoder().encode(userLikedTracks) {
+                UserDefaults.standard.set(likesData, forKey: userLikesKey)
+            }
+        } else {
+            UserDefaults.standard.removeObject(forKey: playlistsKey)
+            UserDefaults.standard.removeObject(forKey: userLikesKey)
+        }
     }
 
     // MARK: - Save OAuth Token
@@ -355,6 +392,7 @@ final class SoundCloudAuthManager: ObservableObject {
 
             _ = try? await api.getUserLikes(userID: user.id, oauthToken: nil, limit: 50, onPage: onPublicLikesPage)
             guard !Task.isCancelled, self.syncGeneration == generation else { return }
+            self.savePersistedState()
         }
 
         // 2. Playlists Sync (accumulate all pages first; write SQLite in 1 transaction only on full completion in OAuth mode)
@@ -378,10 +416,7 @@ final class SoundCloudAuthManager: ObservableObject {
 
             if playlistsSyncCompleted {
                 self.userPlaylists = accumulatedPlaylists
-                self.userAlbums = accumulatedPlaylists.filter {
-                    ($0.trackCount ?? 0) >= 5 ||
-                    ($0.title.lowercased().contains("album") || $0.title.lowercased().contains("ep"))
-                }
+                self.userAlbums = accumulatedPlaylists.filter { $0.isAlbumPlaylist }
                 LibraryManager.shared.syncUserPlaylists(accumulatedPlaylists)
                 self.savePersistedState()
             }
@@ -393,10 +428,7 @@ final class SoundCloudAuthManager: ObservableObject {
                     accumulatedPlaylists.append(pl)
                 }
                 self.userPlaylists = accumulatedPlaylists
-                self.userAlbums = accumulatedPlaylists.filter {
-                    ($0.trackCount ?? 0) >= 5 ||
-                    ($0.title.lowercased().contains("album") || $0.title.lowercased().contains("ep"))
-                }
+                self.userAlbums = accumulatedPlaylists.filter { $0.isAlbumPlaylist }
                 self.savePersistedState()
             }
         }
@@ -409,18 +441,6 @@ final class SoundCloudAuthManager: ObservableObject {
             self.userFollowings = followings
             self.savePersistedState()
         }
-    }
-
-    private func deduplicateTracks(_ tracks: [Track]) -> [Track] {
-        var seen = Set<Int>()
-        var result: [Track] = []
-        result.reserveCapacity(tracks.count)
-        for track in tracks {
-            if seen.insert(track.id).inserted {
-                result.append(track)
-            }
-        }
-        return result
     }
 
     // MARK: - Sign Out

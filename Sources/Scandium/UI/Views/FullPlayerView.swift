@@ -24,23 +24,22 @@ struct FullPlayerView: View {
     init() {}
 
     var body: some View {
-        GeometryReader { geometry in
-            let screenWidth = max(1, geometry.size.width)
-            let screenHeight = max(1, geometry.size.height)
-            let artSize = max(1, min(screenWidth - 48, screenHeight * 0.38))
+        ZStack {
+            // True OLED black background with subtle dynamic artwork blur
+            AmbientCanvasBackground(
+                artworkURL: player.currentTrack?.highResArtworkURL
+            )
+            .ignoresSafeArea()
 
-            ZStack {
-                // True OLED black background with subtle dynamic artwork blur
-                AmbientCanvasBackground(
-                    artworkURL: player.currentTrack?.highResArtworkURL
-                )
-                .frame(width: screenWidth, height: screenHeight)
-                .clipped()
+            GeometryReader { geometry in
+                let screenWidth = max(1, geometry.size.width)
+                let screenHeight = max(1, geometry.size.height)
+                let artSize = max(1, min(screenWidth - 48, screenHeight * 0.38))
 
                 VStack(spacing: 0) {
                     headerSection
-                        .padding(.top, 12)
-                        .padding(.bottom, 14)
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
 
                     Spacer(minLength: 6)
 
@@ -65,38 +64,35 @@ struct FullPlayerView: View {
 
                     bottomBarSection
                         .padding(.horizontal, 24)
-                        .padding(.bottom, 20)
+                        .padding(.bottom, 12)
                 }
                 .frame(width: screenWidth, height: screenHeight)
                 .clipped()
             }
-            .frame(width: screenWidth, height: screenHeight)
-            .clipped()
-            .offset(y: max(0, dragOffsetY))
-            .gesture(
-                DragGesture(minimumDistance: 25)
-                    .onChanged { value in
-                        if value.translation.height > 0 {
-                            dragOffsetY = value.translation.height
-                        }
-                    }
-                    .onEnded { value in
-                        if value.translation.height > 120 || value.predictedEndTranslation.height > 250 {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                dragOffsetY = screenHeight
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                presentationMode.wrappedValue.dismiss()
-                            }
-                        } else {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                dragOffsetY = 0
-                            }
-                        }
-                    }
-            )
         }
-        .ignoresSafeArea()
+        .offset(y: max(0, dragOffsetY))
+        .gesture(
+            DragGesture(minimumDistance: 25)
+                .onChanged { value in
+                    if value.translation.height > 0 {
+                        dragOffsetY = value.translation.height
+                    }
+                }
+                .onEnded { value in
+                    if value.translation.height > 120 || value.predictedEndTranslation.height > 250 {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            dragOffsetY = UIScreen.main.bounds.height
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            presentationMode.wrappedValue.dismiss()
+                        }
+                    } else {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            dragOffsetY = 0
+                        }
+                    }
+                }
+        )
         .preferredColorScheme(.dark)
         .onAppear {
             loadWaveform()
@@ -217,22 +213,18 @@ struct FullPlayerView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if let track = player.currentTrack {
-                HStack(spacing: 6) {
-                    let isLiked = library.isLiked(track: track)
-                    Button(action: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                            library.toggleLike(track: track)
-                        }
-                    }) {
-                        Image(systemName: isLiked ? "heart.fill" : "heart")
-                            .font(.system(size: 22, weight: .medium))
-                            .foregroundColor(isLiked ? ScandiumTheme.spotifyGreen : Color.white.opacity(0.7))
-                            .frame(width: 36, height: 36)
+                let isLiked = library.isLiked(track: track)
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                        library.toggleLike(track: track)
                     }
-                    .buttonStyle(PlainButtonStyle())
-
-                    trackOptionsMenu(track: track)
+                }) {
+                    Image(systemName: isLiked ? "heart.fill" : "heart")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundColor(isLiked ? ScandiumTheme.spotifyGreen : Color.white.opacity(0.7))
+                        .frame(width: 36, height: 36)
                 }
+                .buttonStyle(PlainButtonStyle())
             }
         }
     }
@@ -563,20 +555,20 @@ struct QueueSheetView: View {
                         Spacer()
                     }
                 } else {
-                    List {
-                        ForEach(Array(player.queue.enumerated()), id: \.offset) { index, track in
-                            GlassTrackRow(
-                                track: track,
-                                isCurrentlyPlaying: index == player.currentIndex,
-                                onTap: {
-                                    player.play(at: index)
-                                }
-                            )
-                            .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVStack(spacing: 4) {
+                            ForEach(Array(player.queue.enumerated()), id: \.offset) { index, track in
+                                GlassTrackRow(
+                                    track: track,
+                                    isCurrentlyPlaying: index == player.currentIndex,
+                                    onTap: {
+                                        player.play(at: index)
+                                    }
+                                )
+                            }
                         }
+                        .padding(.vertical, 8)
                     }
-                    .listStyle(PlainListStyle())
                 }
             }
         }

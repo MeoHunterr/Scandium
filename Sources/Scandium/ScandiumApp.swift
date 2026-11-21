@@ -6,6 +6,7 @@ import AVFoundation
 
 @main
 struct ScandiumApp: App {
+    @Environment(\.colorScheme) private var envColorScheme
     @StateObject private var scraper: ClientIDScraper
     @StateObject private var api: SoundCloudAPI
     @StateObject private var player: AudioPlayerEngine
@@ -72,6 +73,7 @@ struct ScandiumApp: App {
             }
             .preferredColorScheme(settings.themeMode.colorScheme)
             .onAppear {
+                settings.systemColorScheme = envColorScheme
                 // Phase 1: Window is now ready — check for previous crash, then mount UI
                 let hadCrash = CrashDiagnosticManager.shared.didCrashDuringLastLaunch
                 // Mark that we are launching NOW (so if we crash, next launch detects it)
@@ -82,6 +84,9 @@ struct ScandiumApp: App {
                 } else {
                     mountMainUI()
                 }
+            }
+            .onChange(of: envColorScheme) { newScheme in
+                settings.systemColorScheme = newScheme
             }
         }
     }
@@ -101,8 +106,8 @@ struct ScandiumApp: App {
     private func configureAppearance() {
         let navAppearance = UINavigationBarAppearance()
         navAppearance.configureWithTransparentBackground()
-        navAppearance.titleTextAttributes = [.foregroundColor: UIColor.white]
-        navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+        navAppearance.titleTextAttributes = [.foregroundColor: UIColor.label]
+        navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor.label]
         UINavigationBar.appearance().standardAppearance = navAppearance
         UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
         UINavigationBar.appearance().compactAppearance = navAppearance
